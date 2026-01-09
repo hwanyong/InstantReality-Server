@@ -6,7 +6,8 @@ import time
 from aiohttp import web
 from aiortc import RTCPeerConnection, RTCSessionDescription
 from webrtc.video_track import OpenCVVideoCapture
-from multi_cam_capture import discover_cameras  # Reusing discovery logic
+from multi_cam_capture import discover_cameras
+from camera_manager import stop_all
 
 # Global list of active PeerConnections
 pcs = set()
@@ -77,6 +78,7 @@ async def on_shutdown(app):
     coros = [pc.close() for pc in pcs]
     await asyncio.gather(*coros)
     pcs.clear()
+    stop_all()
 
 if __name__ == "__main__":
     app = web.Application()

@@ -1,48 +1,31 @@
-import cv2
-import asyncio
 from aiortc import VideoStreamTrack
 from av import VideoFrame
 import time
+import numpy as np
+from camera_manager import get_camera
 
 class OpenCVVideoCapture(VideoStreamTrack):
     """
-    A VideoStreamTrack that yields frames from an OpenCV capture.
+    A VideoStreamTrack that yields frames from the CameraManager.
     """
-    def __init__(self, camera_index=0, options={"width": 640, "height": 480}):
+    def __init__(self, camera_index=0, options=None):
         super().__init__()
         self.camera_index = camera_index
-        self.cap = cv2.VideoCapture(camera_index, cv2.CAP_DSHOW)
+        # We don't need options here as Manager handles it, but keeping arg for compatibility
+        self.cam_thread = get_camera(camera_index)
         
-        # Configure Resolution
-        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, options["width"])
-        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, options["height"])
-        
-        self.latest_high_res_frame = None
-        
-        if not self.cap.isOpened():
-            print(f"Warning: Could not open camera {camera_index}")
-            
     async def recv(self):
         pts, time_base = await self.next_timestamp()
         
-        # Read frame (blocking call, but fast enough for usb cam typically)
-        ret, frame = self.cap.read()
+        # 1. Non-blocking fetch from manager
+        high_res, processed_rgb = self.cam_thread.get_frames()
         
-        if not ret:
-            # Create a dummy black frame if failed
-            frame = self._create_black_frame(640, 360) # 360p (16:9)
-            self.latest_high_res_frame = None
-        else:
-            # Store the raw high-res frame (e.g. 1920x1080) for AI
-            self.latest_high_res_frame = frame
-            
-            # Resize for WebRTC Streaming (Low Latency) -> 640x360 (16:9)
-            frame = cv2.resize(frame, (640, 360))
-            
-        # Convert BGR (OpenCV) to RGB (aiortc/av expects YUV or RGB)
-        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        if processed_rgb is None:
+            # Camera hasn't started or is failing, send black frame
+            processed_rgb = self._create_black_frame(640, 360)
         
-        video_frame = VideoFrame.from_ndarray(frame_rgb, format="rgb24")
+        # 2. Wrap in VideoFrame (Zero-copy ideally, extremely fast)
+        video_frame = VideoFrame.from_ndarray(processed_rgb, format="rgb24")
         video_frame.pts = pts
         video_frame.time_base = time_base
         
@@ -50,13 +33,13 @@ class OpenCVVideoCapture(VideoStreamTrack):
 
     def get_latest_frame(self):
         """Returns the latest high-resolution frame (BGR) or None."""
-        return self.latest_high_res_frame
+        high_res, _ = self.cam_thread.get_frames()
+        return high_res
 
     def _create_black_frame(self, width, height):
-        import numpy as np
         return np.zeros((height, width, 3), dtype=np.uint8)
 
     def stop(self):
-        if self.cap.isOpened():
-            self.cap.release()
+        # We generally don't stop the global camera thread here because multiple clients might share it.
+        # But per current architecture, we can leave it running.
         super().stop()
