@@ -17,6 +17,8 @@ class OpenCVVideoCapture(VideoStreamTrack):
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, options["width"])
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, options["height"])
         
+        self.latest_high_res_frame = None
+        
         if not self.cap.isOpened():
             print(f"Warning: Could not open camera {camera_index}")
             
@@ -24,17 +26,20 @@ class OpenCVVideoCapture(VideoStreamTrack):
         pts, time_base = await self.next_timestamp()
         
         # Read frame (blocking call, but fast enough for usb cam typically)
-        # For high-performance, this read should ideally be in a separate thread/executor
         ret, frame = self.cap.read()
         
         if not ret:
-            # If failed to read, send a black frame or re-raise
-            # For robustness, we might want to retry or just skip
-            # Create a dummy black frame
-            frame = self._create_black_frame(640, 480)
+            # Create a dummy black frame if failed
+            frame = self._create_black_frame(640, 360) # 360p (16:9)
+            self.latest_high_res_frame = None
+        else:
+            # Store the raw high-res frame (e.g. 1920x1080) for AI
+            self.latest_high_res_frame = frame
+            
+            # Resize for WebRTC Streaming (Low Latency) -> 640x360 (16:9)
+            frame = cv2.resize(frame, (640, 360))
             
         # Convert BGR (OpenCV) to RGB (aiortc/av expects YUV or RGB)
-        # aiortc usually handles YUV conversion internally if we give it VideoFrame
         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         
         video_frame = VideoFrame.from_ndarray(frame_rgb, format="rgb24")
@@ -42,6 +47,10 @@ class OpenCVVideoCapture(VideoStreamTrack):
         video_frame.time_base = time_base
         
         return video_frame
+
+    def get_latest_frame(self):
+        """Returns the latest high-resolution frame (BGR) or None."""
+        return self.latest_high_res_frame
 
     def _create_black_frame(self, width, height):
         import numpy as np
