@@ -25,6 +25,9 @@ class CameraThread:
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
         
+        # Default Focus Strategy: Auto Focus ON initially
+        # self.cap.set(cv2.CAP_PROP_AUTOFOCUS, 1)
+
         if not self.cap.isOpened():
             print(f"Error: Could not open camera {self.camera_index}")
             return
@@ -33,6 +36,26 @@ class CameraThread:
         self.thread = threading.Thread(target=self._capture_loop, daemon=True)
         self.thread.start()
         print(f"Camera {self.camera_index} thread started.")
+
+    def set_focus(self, auto_focus=True, value=0):
+        """
+        Control camera focus.
+        :param auto_focus: True for Auto Focus, False for Manual Focus
+        :param value: Focus value (0-255), used only if auto_focus is False
+        """
+        if not self.cap or not self.cap.isOpened():
+            return
+
+        # Note: CAP_PROP_AUTOFOCUS values can vary by backend. 
+        # Typically 1=On, 0=Off. Some backends use boolean.
+        
+        print(f"Camera {self.camera_index}: Setting Focus Auto={auto_focus}, Value={value}")
+        
+        if auto_focus:
+            self.cap.set(cv2.CAP_PROP_AUTOFOCUS, 1)
+        else:
+            self.cap.set(cv2.CAP_PROP_AUTOFOCUS, 0)
+            self.cap.set(cv2.CAP_PROP_FOCUS, value)
 
     def stop(self):
         self.running = False
@@ -85,6 +108,13 @@ def get_camera(index):
         _cameras[index] = CameraThread(index)
         _cameras[index].start()
     return _cameras[index]
+
+def set_camera_focus(index, auto_focus, value):
+    if index in _cameras:
+        _cameras[index].set_focus(auto_focus, value)
+    else:
+        # If camera not initialized, we initialize it temporarily or just warn
+        print(f"Warning: Camera {index} not running, cannot set focus.")
 
 def stop_all():
     print("Stopping all cameras...")

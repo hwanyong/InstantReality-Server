@@ -73,6 +73,20 @@ async def javascript(request):
     content = open(os.path.join("src/static", "client.js"), "r").read()
     return web.Response(content_type="application/javascript", text=content)
 
+async def set_focus_handler(request):
+    try:
+        data = await request.json()
+        camera_index = int(data.get("camera_index", 0))
+        auto = bool(data.get("auto", True))
+        value = int(data.get("value", 0))
+        
+        from camera_manager import set_camera_focus
+        set_camera_focus(camera_index, auto, value)
+        
+        return web.Response(text=json.dumps({"status": "ok"}), content_type="application/json")
+    except Exception as e:
+        return web.Response(status=500, text=json.dumps({"error": str(e)}), content_type="application/json")
+
 async def on_shutdown(app):
     # Close all PCs
     coros = [pc.close() for pc in pcs]
@@ -85,6 +99,7 @@ if __name__ == "__main__":
     app.router.add_get("/", index)
     app.router.add_get("/client.js", javascript)
     app.router.add_post("/offer", offer)
+    app.router.add_post("/set_focus", set_focus_handler)
     app.on_shutdown.append(on_shutdown)
     
     print("Server started at http://localhost:8080")

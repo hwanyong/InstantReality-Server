@@ -70,3 +70,42 @@ function start() {
         alert(e);
     });
 }
+
+function toggleFocus(camIndex) {
+    var isAuto = document.getElementById('chk-auto-' + camIndex).checked;
+    var slider = document.getElementById('rng-focus-' + camIndex);
+    var valSpan = document.getElementById('val-focus-' + camIndex);
+
+    slider.disabled = isAuto;
+
+    // If switching to manual, send current slider value
+    // If switching to auto, value is ignored by server but we send 0
+    sendFocus(camIndex, isAuto, slider.value);
+}
+
+function updateFocus(camIndex) {
+    var slider = document.getElementById('rng-focus-' + camIndex);
+    var valSpan = document.getElementById('val-focus-' + camIndex);
+    valSpan.innerText = slider.value;
+
+    // Debounce could be good here, but for now we send on input
+    sendFocus(camIndex, false, slider.value);
+}
+
+function sendFocus(camIndex, isAuto, value) {
+    fetch('/set_focus', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            camera_index: camIndex,
+            auto: isAuto,
+            value: parseInt(value)
+        }),
+    }).then(response => {
+        if (!response.ok) {
+            console.error("Failed to set focus");
+        }
+    });
+}
