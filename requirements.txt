@@ -3,3 +3,4 @@ pyserial
 numpy
 aiortc
 google-genai
+aiohttp
