@@ -87,6 +87,30 @@ async def set_focus_handler(request):
     except Exception as e:
         return web.Response(status=500, text=json.dumps({"error": str(e)}), content_type="application/json")
 
+async def analyze_handler(request):
+    try:
+        data = await request.json()
+        instruction = data.get("instruction", "Describe this scene")
+        camera_index = int(data.get("camera_index", 0))
+        
+        # Get frame from camera manager
+        cam_thread = camera_manager.get_camera(camera_index)
+        if not cam_thread:
+            return web.Response(status=404, text=json.dumps({"error": "Camera not found"}), content_type="application/json")
+            
+        high_res, _ = cam_thread.get_frames()
+        if high_res is None:
+            return web.Response(status=503, text=json.dumps({"error": "Camera not ready"}), content_type="application/json")
+
+        # Perform analysis
+        print(f"Analyzing frame from Camera {camera_index} with instruction: {instruction}")
+        result = brain.analyze_frame(high_res, instruction)
+        
+        return web.Response(text=json.dumps(result), content_type="application/json")
+    except Exception as e:
+        print(f"Analysis Error: {e}")
+        return web.Response(status=500, text=json.dumps({"error": str(e)}), content_type="application/json")
+
 async def on_shutdown(app):
     # Close all PCs
     coros = [pc.close() for pc in pcs]

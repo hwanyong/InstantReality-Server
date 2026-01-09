@@ -5,7 +5,37 @@ function log(msg) {
     console.log(msg);
 }
 
+function toggleStream() {
+    var btn = document.getElementById('streamBtn');
+    if (pc) {
+        stop();
+    } else {
+        start();
+    }
+}
+
+function stop() {
+    var btn = document.getElementById('streamBtn');
+
+    if (pc) {
+        pc.close();
+        pc = null;
+    }
+
+    // Clear Video Grid
+    document.getElementById('videoGrid').innerHTML = '';
+
+    // Reset Button UI
+    btn.innerText = "Start Streaming";
+    btn.className = "";
+    log("Streaming stopped.");
+}
+
 function start() {
+    var btn = document.getElementById('streamBtn');
+    btn.disabled = true;
+    btn.innerText = "Connecting...";
+
     var config = {
         sdpSemantics: 'unified-plan'
     };
@@ -15,16 +45,48 @@ function start() {
 
     pc = new RTCPeerConnection(config);
 
+    // Track counter to assign indices (0, 1...) to incoming streams
+    var trackCounter = 0;
+
     // Dynamic Video Element Creation
     pc.ontrack = function (evt) {
         log("Track received: " + evt.track.kind);
         if (evt.track.kind == 'video') {
-            var el = document.createElement("video");
-            el.srcObject = new MediaStream([evt.track]);
-            el.autoplay = true;
-            el.control = true;
-            el.playsInline = true;
-            document.getElementById('videoGrid').appendChild(el);
+            var camIndex = trackCounter++;
+            log("Assigning Camera Index: " + camIndex);
+
+            // 1. Create Container
+            var container = document.createElement("div");
+            container.className = "video-container";
+
+            // 2. Create Video Element
+            var videoEl = document.createElement("video");
+            videoEl.srcObject = new MediaStream([evt.track]);
+            videoEl.autoplay = true;
+            videoEl.controls = false; // We use our own controls, or default ones if needed
+            videoEl.playsInline = true;
+
+            // 3. Create Controls Panel
+            var controlsDiv = document.createElement("div");
+            controlsDiv.className = "video-controls";
+            controlsDiv.innerHTML = `
+                <div class="control-group">
+                    <strong>Camera ${camIndex} Focus:</strong>
+                    <label>
+                        <input type="checkbox" id="chk-auto-${camIndex}" checked onchange="toggleFocus(${camIndex})"> 
+                        Auto
+                    </label>
+                </div>
+                <div class="control-group">
+                    <input type="range" id="rng-focus-${camIndex}" min="0" max="255" value="0" disabled oninput="updateFocus(${camIndex})">
+                    <span id="val-focus-${camIndex}" style="min-width: 30px; text-align: right;">0</span>
+                </div>
+            `;
+
+            // 4. Assemble
+            container.appendChild(videoEl);
+            container.appendChild(controlsDiv);
+            document.getElementById('videoGrid').appendChild(container);
         }
     };
 
@@ -65,8 +127,14 @@ function start() {
     }).then(function (response) {
         return response.json();
     }).then(function (answer) {
+        btn.innerText = "Stop Streaming";
+        btn.className = "btn-stop";
+        btn.disabled = false;
         return pc.setRemoteDescription(answer);
     }).catch(function (e) {
+        btn.innerText = "Start Streaming";
+        btn.className = "";
+        btn.disabled = false;
         alert(e);
     });
 }

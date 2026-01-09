@@ -34,10 +34,24 @@
             color: white;
             border: none;
             border-radius: 5px;
+            transition: background 0.3s ease;
         }
 
         button:hover {
             background: #0056b3;
+        }
+
+        button.btn-stop {
+            background: #dc3545;
+        }
+
+        button.btn-stop:hover {
+            background: #a71d2a;
+        }
+
+        button:disabled {
+            background: #6c757d;
+            cursor: not-allowed;
         }
 
         #logs {
@@ -50,27 +64,11 @@
 
 <body>
     <h1>InstantReality Camera Stream</h1>
-    <button id="startBtn" onclick="start()">Start Streaming</button>
+    <button id="streamBtn" onclick="toggleStream()">Start Streaming</button>
     <div class="video-grid" id="videoGrid">
         <!-- Videos will be added here dynamically -->
     </div>
 
-    <div id="controls"
-        style="margin: 20px; padding: 20px; background: #333; border-radius: 8px; display: inline-block;">
-        <h3>Camera Focus Control</h3>
-        <div class="control-group">
-            <label>Camera 0:</label>
-            <label><input type="checkbox" id="chk-auto-0" checked onchange="toggleFocus(0)"> Auto Focus</label>
-            <input type="range" id="rng-focus-0" min="0" max="255" value="0" disabled oninput="updateFocus(0)">
-            <span id="val-focus-0">0</span>
-        </div>
-        <div class="control-group" style="margin-top: 10px;">
-            <label>Camera 1:</label>
-            <label><input type="checkbox" id="chk-auto-1" checked onchange="toggleFocus(1)"> Auto Focus</label>
-            <input type="range" id="rng-focus-1" min="0" max="255" value="0" disabled oninput="updateFocus(1)">
-            <span id="val-focus-1">0</span>
-        </div>
-    </div>
     <div id="logs"></div>
 
     <script src="client.js"></script>
