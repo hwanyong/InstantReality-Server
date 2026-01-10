@@ -4,7 +4,7 @@ import time
 import numpy as np
 
 class CameraThread:
-    def __init__(self, camera_index, width=1920, height=1080):
+    def __init__(self, camera_index, width=1280, height=720):
         self.camera_index = camera_index
         self.width = width
         self.height = height
@@ -102,6 +102,20 @@ class CameraThread:
 
 # Global Manager Pattern
 _cameras = {}
+
+def init_cameras(indices, width=1280, height=720):
+    """Initialize multiple cameras at startup. Called once when server starts."""
+    print(f"Initializing cameras: {indices}")
+    for idx in indices:
+        if idx not in _cameras:
+            cam = CameraThread(idx, width, height)
+            cam.start()
+            _cameras[idx] = cam
+    print(f"Cameras initialized: {list(_cameras.keys())}")
+
+def get_active_cameras():
+    """Return list of camera indices that are currently running."""
+    return list(_cameras.keys())
 
 def get_camera(index):
     if index not in _cameras:

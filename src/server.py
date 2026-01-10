@@ -7,7 +7,7 @@ from aiohttp import web
 from aiortc import RTCPeerConnection, RTCSessionDescription
 from webrtc.video_track import OpenCVVideoCapture
 from multi_cam_capture import discover_cameras
-from camera_manager import stop_all
+from camera_manager import stop_all, init_cameras, get_active_cameras, get_camera
 from ai_engine import GeminiBrain
 
 # Global list of active PeerConnections
@@ -31,31 +31,16 @@ async def offer(request):
             await pc.close()
             pcs.discard(pc)
 
-    # Note: We need to discover cameras. 
-    # For a real system, we might want a global CameraManager so we don't open/close cams per user
-    # But for this prototype, checking availability per connection or sharing a global track is key.
-    # Opening the SAME camera multiple times on Windows often fails.
-    # We should probably use a Shared Track approach or just support 1 client for now.
-    # Let's try to just open them. If it fails, we know we need a Manager.
-    # Actually, let's stick to the plan: multiple tracks.
-    
-    # Simple discovery for this connection
-    # WARNING: Opening a camera that is already open (by another process or previous connection) might fail.
-    # We will grab index 0 and 1 if available.
-    
-    # Ideally we should have a global set of tracks that are added to the PC.
-    # For now, let's instantiate tracks here.
-    
-    # Dynamic Discovery: Check for active cameras (up to 4)
-    # This might take a briefly moment on first connect
-    camera_indices = discover_cameras(max_indices=4)
+    # Broadcast Mode: Use already-running cameras from startup
+    # No re-discovery needed, cameras are initialized at server start
+    camera_indices = get_active_cameras()
     if not camera_indices:
-        print("Warning: No cameras found!")
+        print("Warning: No cameras running!")
     
     for idx in camera_indices:
         try:
             # We assume these cameras exist for the test
-            track = OpenCVVideoCapture(camera_index=idx, options={"width": 1920, "height": 1080})
+            track = OpenCVVideoCapture(camera_index=idx, options={"width": 1280, "height": 720})
             pc.addTrack(track)
             print(f"Added track for Camera {idx}")
         except Exception as e:
@@ -101,7 +86,7 @@ async def analyze_handler(request):
         camera_index = int(data.get("camera_index", 0))
         
         # Get frame from camera manager
-        cam_thread = camera_manager.get_camera(camera_index)
+        cam_thread = get_camera(camera_index)
         if not cam_thread:
             return web.Response(status=404, text=json.dumps({"error": "Camera not found"}), content_type="application/json")
             
@@ -126,6 +111,15 @@ async def on_shutdown(app):
     stop_all()
 
 if __name__ == "__main__":
+    # 1. Discover and start cameras at server boot (Broadcast Mode)
+    print("Discovering and initializing cameras...")
+    discovered_indices = discover_cameras(max_indices=4)
+    if discovered_indices:
+        init_cameras(discovered_indices, width=1280, height=720)
+    else:
+        print("Warning: No cameras found at startup!")
+    
+    # 2. Setup Web Application
     app = web.Application()
     app.router.add_get("/", index)
     app.router.add_get("/client.mjs", javascript)
