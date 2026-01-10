@@ -8,9 +8,11 @@ from aiortc import RTCPeerConnection, RTCSessionDescription
 from webrtc.video_track import OpenCVVideoCapture
 from multi_cam_capture import discover_cameras
 from camera_manager import stop_all
+from ai_engine import GeminiBrain
 
 # Global list of active PeerConnections
 pcs = set()
+brain = GeminiBrain()
 
 async def offer(request):
     params = await request.json()
@@ -70,7 +72,7 @@ async def index(request):
     return web.Response(content_type="text/html", text=content)
 
 async def javascript(request):
-    content = open(os.path.join("src/static", "client.js"), "r").read()
+    content = open(os.path.join("src/static", "client.mjs"), "r").read()
     return web.Response(content_type="application/javascript", text=content)
 
 async def set_focus_handler(request):
@@ -121,9 +123,10 @@ async def on_shutdown(app):
 if __name__ == "__main__":
     app = web.Application()
     app.router.add_get("/", index)
-    app.router.add_get("/client.js", javascript)
+    app.router.add_get("/client.mjs", javascript)
     app.router.add_post("/offer", offer)
     app.router.add_post("/set_focus", set_focus_handler)
+    app.router.add_post("/analyze", analyze_handler)
     app.on_shutdown.append(on_shutdown)
     
     print("Server started at http://localhost:8080")

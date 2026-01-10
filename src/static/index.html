@@ -60,18 +60,37 @@
             color: #ccc;
         }
     </style>
+    <script type="module" src="client.mjs"></script>
 </head>
 
 <body>
     <h1>InstantReality Camera Stream</h1>
-    <button id="streamBtn" onclick="toggleStream()">Start Streaming</button>
+    <button id="streamBtn">Start Streaming</button>
     <div class="video-grid" id="videoGrid">
         <!-- Videos will be added here dynamically -->
     </div>
 
     <div id="logs"></div>
 
-    <script src="client.js"></script>
+    <template id="video-control-template">
+        <div class="video-container">
+            <video autoplay playsinline></video>
+            <div class="video-controls">
+                <div class="control-group">
+                    <strong class="cam-label">Camera Focus:</strong>
+                    <label>
+                        <input type="checkbox" class="chk-auto" checked>
+                        Auto
+                    </label>
+                </div>
+                <div class="control-group">
+                    <input type="range" class="rng-focus" min="0" max="255" value="0" disabled>
+                    <span class="val-focus" style="min-width: 30px; text-align: right;">0</span>
+                </div>
+            </div>
+        </div>
+    </template>
+
 </body>
 
 </html>

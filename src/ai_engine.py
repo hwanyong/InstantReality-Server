@@ -14,11 +14,15 @@ class GeminiBrain:
             # We might want to load from a .env file explicitly if using python-dotenv
             # For now, we assume it's set or we'll fail later.
         
-        self.client = genai.Client(api_key=self.api_key)
-        self.model_name = "gemini-1.5-pro-latest" # Using latest stable pro, or "gemini-robotics-er-1.5-preview" if accessible
-        # Note: "gemini-robotics-er-1.5-preview" might require specific whitelisting or endpoint.
-        # I'll default to standard pro for now unless instructed otherwise, but user mentioned the preview.
-        # I will accept an env var for model name too.
+        self.client = None
+        if self.api_key:
+            try:
+                self.client = genai.Client(api_key=self.api_key)
+            except Exception as e:
+                print(f"Failed to initialize Gemini Client: {e}")
+        else:
+            print("Gemini Client not initialized (Missing Key)")
+            
         self.model_name = os.environ.get("GEMINI_MODEL", "gemini-1.5-pro-latest")
 
     def analyze_frame(self, frame_bgr, instruction):
@@ -26,8 +30,8 @@ class GeminiBrain:
         Analyzes a single frame (BGR numpy from OpenCV) with a text instruction.
         Returns a JSON object with the analysis result.
         """
-        if not self.api_key:
-            return {"error": "API Key missing"}
+        if not self.client:
+            return {"error": "AI not initialized (Missing API Key). Please set GEMINI_API_KEY."}
 
         try:
             # 1. Convert BGR to RGB (Gemini expects RGB)
