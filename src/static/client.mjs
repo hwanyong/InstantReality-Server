@@ -104,6 +104,16 @@ const handleNegotiation = (pc) => {
                     }
                 }
                 pc.addEventListener('icecandidate', checkState)
+
+                // Safari workaround: ICE gathering often hangs and never reaches 'complete'
+                // Proceed with whatever candidates we have after 2 seconds
+                setTimeout(() => {
+                    if (pc.iceGatheringState !== 'complete') {
+                        console.warn('ICE gathering timed out, sending available candidates')
+                        pc.removeEventListener('icecandidate', checkState)
+                        resolve()
+                    }
+                }, 2000)
             })
         })
         .then(() => {
