@@ -45,7 +45,12 @@ async def offer(request):
     
     # Ideally we should have a global set of tracks that are added to the PC.
     # For now, let's instantiate tracks here.
-    camera_indices = [0, 1] # Hardcoded for test or use discover_cameras()
+    
+    # Dynamic Discovery: Check for active cameras (up to 4)
+    # This might take a briefly moment on first connect
+    camera_indices = discover_cameras(max_indices=4)
+    if not camera_indices:
+        print("Warning: No cameras found!")
     
     for idx in camera_indices:
         try:

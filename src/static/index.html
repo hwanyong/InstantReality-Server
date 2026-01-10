@@ -11,30 +11,106 @@
             background: #222;
             color: #fff;
             text-align: center;
+            margin: 0;
+            padding: 0;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            /* Prevent scrolling if possible */
+        }
+
+        h1 {
+            margin: 10px 0;
+            font-size: 1.2rem;
+            flex-shrink: 0;
+        }
+
+        #streamBtn {
+            margin-bottom: 10px;
+            flex-shrink: 0;
         }
 
         .video-grid {
+            flex-grow: 1;
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            grid-template-columns: 1fr;
             gap: 10px;
-            padding: 20px;
+            padding: 10px;
+            width: 100%;
+            box-sizing: border-box;
+            align-content: center;
+            /* Center grid vertically */
+            justify-content: center;
+        }
+
+        @media (min-width: 900px) {
+            .video-grid {
+                grid-template-columns: repeat(2, 1fr);
+                /* Removed forced row height */
+            }
+        }
+
+        .video-container {
+            position: relative;
+            width: 100%;
+            /* Force 16:9 Aspect Ratio */
+            aspect-ratio: 16 / 9;
+            background: #000;
+            border: 1px solid #333;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            margin: 0 auto;
+            /* Center if it doesn't fill */
         }
 
         video {
             width: 100%;
-            border: 2px solid #555;
-            background: #000;
+            height: 100%;
+            object-fit: contain;
+            /* Maintain aspect ratio (no distortion) */
+            flex-grow: 1;
+        }
+
+        /* Overlay controls to maximize video space */
+        .video-controls {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            background: rgba(0, 0, 0, 0.6);
+            padding: 5px;
+            box-sizing: border-box;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 15px;
+            font-size: 0.8rem;
+            opacity: 0;
+            /* Hide by default, show on hover */
+            transition: opacity 0.3s;
+        }
+
+        .video-container:hover .video-controls {
+            opacity: 1;
+        }
+
+        /* Adjust control inputs for smaller size */
+        .control-group {
+            display: flex;
+            align-items: center;
+            gap: 5px;
         }
 
         button {
-            padding: 10px 20px;
-            font-size: 16px;
+            padding: 8px 16px;
+            font-size: 14px;
             cursor: pointer;
             background: #007bff;
             color: white;
             border: none;
-            border-radius: 5px;
-            transition: background 0.3s ease;
+            border-radius: 4px;
         }
 
         button:hover {
@@ -55,9 +131,8 @@
         }
 
         #logs {
-            margin-top: 20px;
-            font-family: monospace;
-            color: #ccc;
+            display: none;
+            /* Hide logs to verify clean UI */
         }
     </style>
     <script type="module" src="client.mjs"></script>

@@ -148,8 +148,12 @@ const startStream = () => {
     state.trackCounter = 0
 
     pc.ontrack = onTrack
-    pc.addTransceiver('video', { direction: 'recvonly' })
-    pc.addTransceiver('video', { direction: 'recvonly' })
+
+    // Support up to 4 cameras dynamically
+    // We offer to receive 4 video tracks. The server will only use what it has.
+    for (let i = 0; i < 4; i++) {
+        pc.addTransceiver('video', { direction: 'recvonly' })
+    }
 
     handleNegotiation(pc)
 }
