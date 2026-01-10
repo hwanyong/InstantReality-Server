@@ -4,7 +4,8 @@ import os
 import time
 
 from aiohttp import web
-from aiortc import RTCPeerConnection, RTCSessionDescription
+from aiortc import RTCPeerConnection, RTCSessionDescription, RTCRtpSender
+
 from webrtc.video_track import OpenCVVideoCapture
 from multi_cam_capture import discover_cameras
 from camera_manager import stop_all, init_cameras, get_active_cameras, get_camera
@@ -37,11 +38,28 @@ async def offer(request):
     if not camera_indices:
         print("Warning: No cameras running!")
     
+    # Force H.264 for Safari support
+    try:
+        capabilities = RTCRtpSender.getCapabilities("video")
+        h264_codecs = [c for c in capabilities.codecs if "H264" in c.mimeType]
+        if h264_codecs:
+            print(f"Enforcing H.264 Codec: {h264_codecs[0]}")
+    except Exception as e:
+        print(f"Error finding H.264 capability: {e}")
+        h264_codecs = []
+
     for idx in camera_indices:
         try:
             # We assume these cameras exist for the test
             track = OpenCVVideoCapture(camera_index=idx, options={"width": 1920, "height": 1080})
-            pc.addTrack(track)
+            sender = pc.addTrack(track)
+            
+            # Apply H.264 preference if available
+            if h264_codecs:
+                transceiver = next((t for t in pc.getTransceivers() if t.sender == sender), None)
+                if transceiver:
+                    transceiver.setCodecPreferences(h264_codecs)
+                    
             print(f"Added track for Camera {idx}")
         except Exception as e:
             print(f"Failed to add track for Camera {idx}: {e}")

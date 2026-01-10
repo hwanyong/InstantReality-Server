@@ -50,8 +50,6 @@ const createVideoCard = (track) => {
     log(`Assigning Camera Index: ${camIndex}`)
 
     const clone = dom.template.content.cloneNode(true)
-    const videoEl = clone.querySelector('video')
-    videoEl.srcObject = new MediaStream([track])
 
     const label = clone.querySelector('.cam-label')
     label.innerText = `Camera ${camIndex} Focus:`
@@ -63,7 +61,18 @@ const createVideoCard = (track) => {
     chkAuto.addEventListener('change', (e) => handleAutoToggle(e, camIndex, rngFocus))
     rngFocus.addEventListener('input', (e) => handleFocusInput(e, camIndex, valSpan))
 
+    // Safari fix: Append to DOM FIRST, then set srcObject and play
     dom.videoGrid.appendChild(clone)
+
+    // Now get the video element that's actually in the DOM (not the template clone)
+    const videoContainers = dom.videoGrid.querySelectorAll('.video-container')
+    const lastContainer = videoContainers[videoContainers.length - 1]
+    const videoEl = lastContainer.querySelector('video')
+
+    videoEl.srcObject = new MediaStream([track])
+
+    // Safari workaround: explicit play() call after element is in DOM
+    videoEl.play().catch(e => console.warn('Autoplay failed:', e))
 }
 
 const onTrack = (evt) => {
