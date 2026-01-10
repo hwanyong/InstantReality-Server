@@ -40,7 +40,7 @@ async def offer(request):
     for idx in camera_indices:
         try:
             # We assume these cameras exist for the test
-            track = OpenCVVideoCapture(camera_index=idx, options={"width": 1280, "height": 720})
+            track = OpenCVVideoCapture(camera_index=idx, options={"width": 1920, "height": 1080})
             pc.addTrack(track)
             print(f"Added track for Camera {idx}")
         except Exception as e:
@@ -115,7 +115,7 @@ if __name__ == "__main__":
     print("Discovering and initializing cameras...")
     discovered_indices = discover_cameras(max_indices=4)
     if discovered_indices:
-        init_cameras(discovered_indices, width=1280, height=720)
+        init_cameras(discovered_indices, width=1920, height=1080)
     else:
         print("Warning: No cameras found at startup!")
     

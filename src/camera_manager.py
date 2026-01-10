@@ -4,7 +4,7 @@ import time
 import numpy as np
 
 class CameraThread:
-    def __init__(self, camera_index, width=1280, height=720):
+    def __init__(self, camera_index, width=1920, height=1080):
         self.camera_index = camera_index
         self.width = width
         self.height = height
