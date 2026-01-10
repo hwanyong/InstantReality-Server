@@ -17,6 +17,12 @@ class CameraThread:
         self.latest_high_res_frame = None # Raw BGR 1080p
         self.latest_processed_frame = None # RGB 360p (Ready for sending)
         
+        # Auto Exposure State
+        self.auto_exposure_enabled = False
+        self.current_exposure = -5
+        self.target_brightness = 128
+        self.frame_counter = 0
+        
     def start(self):
         if self.running:
             return
@@ -71,7 +77,49 @@ class CameraThread:
         value = max(-13, min(0, value))
         
         print(f"Camera {self.camera_index}: Setting Exposure={value}")
+        self.current_exposure = value
         self.cap.set(cv2.CAP_PROP_EXPOSURE, value)
+
+    def set_auto_exposure(self, enabled, target_brightness=128):
+        """
+        Enable/disable auto exposure mode.
+        :param enabled: True for auto, False for manual
+        :param target_brightness: Target brightness (0-255), used only if enabled
+        """
+        self.auto_exposure_enabled = enabled
+        self.target_brightness = max(0, min(255, target_brightness))
+        print(f"Camera {self.camera_index}: Auto Exposure={enabled}, Target={self.target_brightness}")
+
+    def _analyze_brightness(self, frame):
+        """Analyze frame brightness using LAB L-channel mean."""
+        lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
+        l_channel = lab[:, :, 0]
+        return np.mean(l_channel)
+
+    def _auto_adjust_exposure(self, brightness):
+        """P-controller for auto exposure adjustment."""
+        if not self.auto_exposure_enabled:
+            return
+        
+        error = self.target_brightness - brightness
+        
+        # Deadband: skip adjustment if close enough to target
+        if abs(error) < 10:
+            return
+        
+        # Proportional control: Kp = 0.05
+        # Scale error to exposure range (-13 to 0)
+        adjustment = error * 0.05
+        new_exposure = self.current_exposure + adjustment
+        
+        # Clamp to valid range
+        new_exposure = max(-13, min(0, new_exposure))
+        
+        # Only apply if changed meaningfully (avoid excessive API calls)
+        if abs(new_exposure - self.current_exposure) >= 0.5:
+            self.current_exposure = int(new_exposure)
+            self.cap.set(cv2.CAP_PROP_EXPOSURE, self.current_exposure)
+            print(f"Camera {self.camera_index}: Auto adjusted exposure to {self.current_exposure} (brightness={brightness:.1f})")
 
     def stop(self):
         self.running = False
@@ -88,6 +136,12 @@ class CameraThread:
                 if not ret:
                     time.sleep(0.1)
                     continue
+
+                # Auto exposure adjustment every 10 frames
+                self.frame_counter += 1
+                if self.frame_counter % 10 == 0 and self.auto_exposure_enabled:
+                    brightness = self._analyze_brightness(frame)
+                    self._auto_adjust_exposure(brightness)
 
                 # 1. Store High-Res (BGR) for AI
                 # Copying might be needed if we modify it, but we strictly read it elsewhere.
@@ -151,6 +205,12 @@ def set_camera_exposure(index, value):
         _cameras[index].set_exposure(value)
     else:
         print(f"Warning: Camera {index} not running, cannot set exposure.")
+
+def set_camera_auto_exposure(index, enabled, target_brightness=128):
+    if index in _cameras:
+        _cameras[index].set_auto_exposure(enabled, target_brightness)
+    else:
+        print(f"Warning: Camera {index} not running, cannot set auto exposure.")
 
 
 def stop_all():

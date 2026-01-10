@@ -110,6 +110,20 @@ async def set_exposure_handler(request):
     except Exception as e:
         return web.Response(status=500, text=json.dumps({"error": str(e)}), content_type="application/json")
 
+async def set_auto_exposure_handler(request):
+    try:
+        data = await request.json()
+        camera_index = int(data.get("camera_index", 0))
+        enabled = bool(data.get("enabled", False))
+        target_brightness = int(data.get("target_brightness", 128))
+        
+        from camera_manager import set_camera_auto_exposure
+        set_camera_auto_exposure(camera_index, enabled, target_brightness)
+        
+        return web.Response(text=json.dumps({"status": "ok"}), content_type="application/json")
+    except Exception as e:
+        return web.Response(status=500, text=json.dumps({"error": str(e)}), content_type="application/json")
+
 
 async def capture_handler(request):
     """Capture and return 1080p JPEG image from specified camera."""
@@ -190,6 +204,7 @@ if __name__ == "__main__":
     app.router.add_post("/offer", offer)
     app.router.add_post("/set_focus", set_focus_handler)
     app.router.add_post("/set_exposure", set_exposure_handler)
+    app.router.add_post("/set_auto_exposure", set_auto_exposure_handler)
     app.router.add_get("/capture", capture_handler)
     app.router.add_post("/analyze", analyze_handler)
     app.on_shutdown.append(on_shutdown)

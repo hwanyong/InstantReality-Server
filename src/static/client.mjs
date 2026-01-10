@@ -68,6 +68,38 @@ const handleExposureInput = (e, camIndex, valSpan) => {
     sendExposure(camIndex, val)
 }
 
+const sendAutoExposure = (camIndex, enabled, targetBrightness) => {
+    fetch('/set_auto_exposure', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            camera_index: camIndex,
+            enabled: enabled,
+            target_brightness: parseInt(targetBrightness)
+        }),
+    }).then(response => {
+        if (!response.ok) {
+            console.error('Failed to set auto exposure')
+        }
+    })
+}
+
+const handleAutoExposureToggle = (e, camIndex, rngExposure, rngTarget) => {
+    const isAuto = e.target.checked
+    rngExposure.disabled = isAuto
+    rngTarget.disabled = !isAuto
+    sendAutoExposure(camIndex, isAuto, rngTarget.value)
+}
+
+const handleTargetInput = (e, camIndex, valSpan) => {
+    const val = e.target.value
+    valSpan.innerText = val
+    sendAutoExposure(camIndex, true, val)
+}
+
+
 const handleCapture = async (camIndex) => {
     try {
         const response = await fetch(`/capture?camera_index=${camIndex}`)
@@ -122,6 +154,14 @@ const createVideoCard = (track) => {
     const rngExposure = clone.querySelector('.rng-exposure')
     const valExposure = clone.querySelector('.val-exposure')
     rngExposure.addEventListener('input', (e) => handleExposureInput(e, camIndex, valExposure))
+
+    // Auto Exposure toggle and Target slider handlers
+    const chkAutoExp = clone.querySelector('.chk-auto-exp')
+    const rngTarget = clone.querySelector('.rng-target')
+    const valTarget = clone.querySelector('.val-target')
+
+    chkAutoExp.addEventListener('change', (e) => handleAutoExposureToggle(e, camIndex, rngExposure, rngTarget))
+    rngTarget.addEventListener('input', (e) => handleTargetInput(e, camIndex, valTarget))
 
     // Capture button handler
     const btnCapture = clone.querySelector('.btn-capture')
