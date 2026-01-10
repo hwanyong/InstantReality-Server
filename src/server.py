@@ -97,6 +97,38 @@ async def set_focus_handler(request):
     except Exception as e:
         return web.Response(status=500, text=json.dumps({"error": str(e)}), content_type="application/json")
 
+async def capture_handler(request):
+    """Capture and return 1080p JPEG image from specified camera."""
+    import cv2
+    
+    try:
+        camera_index = int(request.query.get("camera_index", 0))
+        
+        cam_thread = get_camera(camera_index)
+        if not cam_thread:
+            return web.Response(status=404, text=json.dumps({"error": "Camera not found"}), content_type="application/json")
+        
+        high_res, _ = cam_thread.get_frames()
+        if high_res is None:
+            return web.Response(status=503, text=json.dumps({"error": "Camera not ready"}), content_type="application/json")
+        
+        # Encode to JPEG (high quality)
+        _, jpeg_bytes = cv2.imencode('.jpg', high_res, [cv2.IMWRITE_JPEG_QUALITY, 95])
+        
+        # Generate filename with timestamp
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"camera_{camera_index}_{timestamp}.jpg"
+        
+        return web.Response(
+            body=jpeg_bytes.tobytes(),
+            content_type="image/jpeg",
+            headers={"Content-Disposition": f"attachment; filename=\"{filename}\""}
+        )
+    except Exception as e:
+        print(f"Capture Error: {e}")
+        return web.Response(status=500, text=json.dumps({"error": str(e)}), content_type="application/json")
+
 async def analyze_handler(request):
     try:
         data = await request.json()
@@ -143,6 +175,7 @@ if __name__ == "__main__":
     app.router.add_get("/client.mjs", javascript)
     app.router.add_post("/offer", offer)
     app.router.add_post("/set_focus", set_focus_handler)
+    app.router.add_get("/capture", capture_handler)
     app.router.add_post("/analyze", analyze_handler)
     app.on_shutdown.append(on_shutdown)
     

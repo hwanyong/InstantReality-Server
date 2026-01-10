@@ -45,6 +45,40 @@ const handleAutoToggle = (e, camIndex, rngFocus) => {
     sendFocus(camIndex, isAuto, rngFocus.value)
 }
 
+const handleCapture = async (camIndex) => {
+    try {
+        const response = await fetch(`/capture?camera_index=${camIndex}`)
+        if (!response.ok) {
+            console.error('Capture failed')
+            return
+        }
+
+        const blob = await response.blob()
+        const url = URL.createObjectURL(blob)
+
+        // Get filename from Content-Disposition header or generate default
+        const contentDisposition = response.headers.get('Content-Disposition')
+        let filename = `camera_${camIndex}_capture.jpg`
+        if (contentDisposition) {
+            const match = contentDisposition.match(/filename="(.+)"/)
+            if (match) filename = match[1]
+        }
+
+        // Trigger download
+        const a = document.createElement('a')
+        a.href = url
+        a.download = filename
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
+
+        URL.revokeObjectURL(url)
+        log(`Captured Camera ${camIndex}: ${filename}`)
+    } catch (e) {
+        console.error('Capture error:', e)
+    }
+}
+
 const createVideoCard = (track) => {
     const camIndex = state.trackCounter++
     log(`Assigning Camera Index: ${camIndex}`)
@@ -60,6 +94,10 @@ const createVideoCard = (track) => {
 
     chkAuto.addEventListener('change', (e) => handleAutoToggle(e, camIndex, rngFocus))
     rngFocus.addEventListener('input', (e) => handleFocusInput(e, camIndex, valSpan))
+
+    // Capture button handler
+    const btnCapture = clone.querySelector('.btn-capture')
+    btnCapture.addEventListener('click', () => handleCapture(camIndex))
 
     // Safari fix: Append to DOM FIRST, then set srcObject and play
     dom.videoGrid.appendChild(clone)
