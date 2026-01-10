@@ -57,6 +57,22 @@ class CameraThread:
             self.cap.set(cv2.CAP_PROP_AUTOFOCUS, 0)
             self.cap.set(cv2.CAP_PROP_FOCUS, value)
 
+    def set_exposure(self, value=-5):
+        """
+        Control camera exposure.
+        :param value: Exposure value (-13 to 0, where -13 is darkest, 0 is brightest)
+        Note: CAP_PROP_AUTO_EXPOSURE toggle doesn't work on DirectShow backend,
+        so we directly manipulate CAP_PROP_EXPOSURE value.
+        """
+        if not self.cap or not self.cap.isOpened():
+            return
+        
+        # Clamp value to valid range
+        value = max(-13, min(0, value))
+        
+        print(f"Camera {self.camera_index}: Setting Exposure={value}")
+        self.cap.set(cv2.CAP_PROP_EXPOSURE, value)
+
     def stop(self):
         self.running = False
         if self.thread:
@@ -129,6 +145,13 @@ def set_camera_focus(index, auto_focus, value):
     else:
         # If camera not initialized, we initialize it temporarily or just warn
         print(f"Warning: Camera {index} not running, cannot set focus.")
+
+def set_camera_exposure(index, value):
+    if index in _cameras:
+        _cameras[index].set_exposure(value)
+    else:
+        print(f"Warning: Camera {index} not running, cannot set exposure.")
+
 
 def stop_all():
     print("Stopping all cameras...")

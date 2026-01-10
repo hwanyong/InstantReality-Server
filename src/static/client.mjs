@@ -45,6 +45,29 @@ const handleAutoToggle = (e, camIndex, rngFocus) => {
     sendFocus(camIndex, isAuto, rngFocus.value)
 }
 
+const sendExposure = (camIndex, value) => {
+    fetch('/set_exposure', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            camera_index: camIndex,
+            value: parseInt(value)
+        }),
+    }).then(response => {
+        if (!response.ok) {
+            console.error('Failed to set exposure')
+        }
+    })
+}
+
+const handleExposureInput = (e, camIndex, valSpan) => {
+    const val = e.target.value
+    valSpan.innerText = val
+    sendExposure(camIndex, val)
+}
+
 const handleCapture = async (camIndex) => {
     try {
         const response = await fetch(`/capture?camera_index=${camIndex}`)
@@ -94,6 +117,11 @@ const createVideoCard = (track) => {
 
     chkAuto.addEventListener('change', (e) => handleAutoToggle(e, camIndex, rngFocus))
     rngFocus.addEventListener('input', (e) => handleFocusInput(e, camIndex, valSpan))
+
+    // Exposure slider handler
+    const rngExposure = clone.querySelector('.rng-exposure')
+    const valExposure = clone.querySelector('.val-exposure')
+    rngExposure.addEventListener('input', (e) => handleExposureInput(e, camIndex, valExposure))
 
     // Capture button handler
     const btnCapture = clone.querySelector('.btn-capture')
