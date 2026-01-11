@@ -41,6 +41,8 @@ export class InstantReality {
         this.pc = null
         this.trackCounter = 0
         this.listeners = {}
+        this.tracks = new Map()
+        this.clientId = null
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -72,7 +74,7 @@ export class InstantReality {
     // WebRTC Core Methods
     // ─────────────────────────────────────────────────────────────────────────
 
-    async connect() {
+    async connect(options = {}) {
         const config = {
             sdpSemantics: 'unified-plan',
             iceServers: this.iceServers
@@ -81,10 +83,20 @@ export class InstantReality {
         const pc = new RTCPeerConnection(config)
         this.pc = pc
         this.trackCounter = 0
+        this.tracks.clear()
+
+        const enabledCameras = options.cameras
 
         pc.ontrack = (evt) => {
             if (evt.track.kind != 'video') return
             const cameraIndex = this.trackCounter++
+            this.tracks.set(cameraIndex, evt.track)
+
+            // Set initial enabled state
+            if (enabledCameras != null) {
+                evt.track.enabled = enabledCameras.includes(cameraIndex)
+            }
+
             this.emit('track', evt.track, cameraIndex)
         }
 
@@ -123,6 +135,7 @@ export class InstantReality {
         }
 
         const answer = await response.json()
+        this.clientId = answer.client_id
         await pc.setRemoteDescription(answer)
 
         return this
@@ -133,8 +146,39 @@ export class InstantReality {
             this.pc.close()
             this.pc = null
         }
+        this.tracks.clear()
+        this.trackCounter = 0
         this.emit('disconnected')
         return this
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Track On/Off Methods
+    // ─────────────────────────────────────────────────────────────────────────
+
+    async setTrackEnabled(cameraIndex, enabled) {
+        const track = this.tracks.get(cameraIndex)
+        if (!track) return false
+        track.enabled = enabled
+
+        // Call server to pause/resume (saves bandwidth)
+        await fetch(`${this.serverUrl}/pause_camera`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                camera_index: cameraIndex,
+                paused: !enabled,
+                client_id: this.clientId
+            })
+        })
+
+        this.emit(enabled ? 'trackEnabled' : 'trackDisabled', cameraIndex)
+        return true
+    }
+
+    isTrackEnabled(cameraIndex) {
+        const track = this.tracks.get(cameraIndex)
+        return track ? track.enabled : false
     }
 
     // ─────────────────────────────────────────────────────────────────────────

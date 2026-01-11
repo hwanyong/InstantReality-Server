@@ -82,6 +82,27 @@ const handleCapture = async (e) => {
     URL.revokeObjectURL(url)
 }
 
+const handleToggleStream = async (e) => {
+    const container = e.target.closest('.video-container')
+    const camIndex = parseInt(container.dataset.camIndex)
+    const btn = container.querySelector('.btn-toggle-stream')
+
+    const isEnabled = client.isTrackEnabled(camIndex)
+    const newState = !isEnabled
+
+    await client.setTrackEnabled(camIndex, newState)
+
+    if (newState) {
+        container.classList.remove('paused')
+        btn.classList.remove('off')
+        btn.innerText = '👁 On'
+    } else {
+        container.classList.add('paused')
+        btn.classList.add('off')
+        btn.innerText = '👁 Off'
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Video Card Creation
 // ─────────────────────────────────────────────────────────────────────────────
@@ -99,6 +120,7 @@ const createVideoCard = (track, cameraIndex) => {
     clone.querySelector('.chk-auto-exp').addEventListener('change', handleAutoExposureToggle)
     clone.querySelector('.rng-target').addEventListener('input', handleTargetInput)
     clone.querySelector('.btn-capture').addEventListener('click', handleCapture)
+    clone.querySelector('.btn-toggle-stream').addEventListener('click', handleToggleStream)
 
     // Safari fix: Append to DOM FIRST, then set srcObject and play
     videoGrid.appendChild(clone)
@@ -106,6 +128,14 @@ const createVideoCard = (track, cameraIndex) => {
     const videoContainers = videoGrid.querySelectorAll('.video-container')
     const lastContainer = videoContainers[videoContainers.length - 1]
     lastContainer.dataset.camIndex = cameraIndex
+
+    // Handle initial enabled state
+    const toggleBtn = lastContainer.querySelector('.btn-toggle-stream')
+    if (!track.enabled) {
+        lastContainer.classList.add('paused')
+        toggleBtn.classList.add('off')
+        toggleBtn.innerText = '👁 Off'
+    }
 
     const videoEl = lastContainer.querySelector('video')
     videoEl.srcObject = new MediaStream([track])

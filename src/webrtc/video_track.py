@@ -13,19 +13,24 @@ class OpenCVVideoCapture(VideoStreamTrack):
         self.camera_index = camera_index
         # We don't need options here as Manager handles it, but keeping arg for compatibility
         self.cam_thread = get_camera(camera_index)
+        self.paused = False
+    
+    def set_paused(self, paused):
+        self.paused = paused
         
     async def recv(self):
         pts, time_base = await self.next_timestamp()
         
-        # 1. Non-blocking fetch from manager
-        high_res, processed_rgb = self.cam_thread.get_frames()
+        if self.paused:
+            # Send black frame when paused (saves bandwidth)
+            frame_rgb = self._create_black_frame(16, 16)
+        else:
+            # Normal: fetch from camera manager
+            high_res, frame_rgb = self.cam_thread.get_frames()
+            if frame_rgb is None:
+                frame_rgb = self._create_black_frame(16, 16)
         
-        if processed_rgb is None:
-            # Camera hasn't started or is failing, send black frame
-            processed_rgb = self._create_black_frame(640, 360)
-        
-        # 2. Wrap in VideoFrame (Zero-copy ideally, extremely fast)
-        video_frame = VideoFrame.from_ndarray(processed_rgb, format="rgb24")
+        video_frame = VideoFrame.from_ndarray(frame_rgb, format="rgb24")
         video_frame.pts = pts
         video_frame.time_base = time_base
         
@@ -43,3 +48,4 @@ class OpenCVVideoCapture(VideoStreamTrack):
         # We generally don't stop the global camera thread here because multiple clients might share it.
         # But per current architecture, we can leave it running.
         super().stop()
+

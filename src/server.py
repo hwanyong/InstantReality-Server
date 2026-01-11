@@ -15,6 +15,9 @@ from ai_engine import GeminiBrain
 pcs = set()
 brain = GeminiBrain()
 
+# Track registry: {pc_id: {camera_index: track}}
+active_tracks = {}
+
 # CORS Middleware for cross-origin requests
 @web.middleware
 async def cors_middleware(request, handler):
@@ -34,8 +37,10 @@ async def offer(request):
 
     pc = RTCPeerConnection()
     pcs.add(pc)
+    pc_id = str(id(pc))
+    active_tracks[pc_id] = {}
 
-    print(f"New connection: {pc}")
+    print(f"New connection: {pc} (client_id: {pc_id})")
 
     # Prepare logic to run when connection closes
     @pc.on("connectionstatechange")
@@ -44,6 +49,7 @@ async def offer(request):
         if pc.connectionState == "failed" or pc.connectionState == "closed":
             await pc.close()
             pcs.discard(pc)
+            active_tracks.pop(pc_id, None)
 
     # Broadcast Mode: Use already-running cameras from startup
     # No re-discovery needed, cameras are initialized at server start
@@ -67,6 +73,9 @@ async def offer(request):
             track = OpenCVVideoCapture(camera_index=idx, options={"width": 1920, "height": 1080})
             sender = pc.addTrack(track)
             
+            # Register track for pause/resume control (per-client)
+            active_tracks[pc_id][idx] = track
+            
             # Apply H.264 preference if available
             if h264_codecs:
                 transceiver = next((t for t in pc.getTransceivers() if t.sender == sender), None)
@@ -84,24 +93,24 @@ async def offer(request):
     return web.Response(
         content_type="application/json",
         text=json.dumps(
-            {"sdp": pc.localDescription.sdp, "type": pc.localDescription.type}
+            {"sdp": pc.localDescription.sdp, "type": pc.localDescription.type, "client_id": pc_id}
         ),
     )
 
 async def index(request):
-    content = open(os.path.join("src/static", "index.html"), "r").read()
+    content = open(os.path.join("src/static", "index.html"), "r", encoding="utf-8").read()
     return web.Response(content_type="text/html", text=content)
 
 async def javascript(request):
-    content = open(os.path.join("src/static", "client.mjs"), "r").read()
+    content = open(os.path.join("src/static", "client.mjs"), "r", encoding="utf-8").read()
     return web.Response(content_type="application/javascript", text=content)
 
 async def serve_sdk_library(request):
-    content = open(os.path.join("src/sdk", "instant-reality.mjs"), "r").read()
+    content = open(os.path.join("src/sdk", "instant-reality.mjs"), "r", encoding="utf-8").read()
     return web.Response(content_type="application/javascript", text=content)
 
 async def serve_sdk_example(request):
-    content = open(os.path.join("src/sdk", "example.html"), "r").read()
+    content = open(os.path.join("src/sdk", "example.html"), "r", encoding="utf-8").read()
     return web.Response(content_type="text/html", text=content)
 
 async def set_focus_handler(request):
@@ -207,7 +216,24 @@ async def on_shutdown(app):
     coros = [pc.close() for pc in pcs]
     await asyncio.gather(*coros)
     pcs.clear()
+    active_tracks.clear()
     stop_all()
+
+async def pause_camera_handler(request):
+    try:
+        data = await request.json()
+        camera_index = int(data.get("camera_index", 0))
+        paused = data.get("paused", True)
+        client_id = data.get("client_id")
+        
+        if client_id and client_id in active_tracks:
+            if camera_index in active_tracks[client_id]:
+                active_tracks[client_id][camera_index].set_paused(paused)
+                print(f"Client {client_id[:8]}... Camera {camera_index}: paused={paused}")
+        
+        return web.json_response({"success": True, "camera_index": camera_index, "paused": paused})
+    except Exception as e:
+        return web.json_response({"success": False, "error": str(e)}, status=500)
 
 if __name__ == "__main__":
     # 1. Discover and start cameras at server boot (Broadcast Mode)
@@ -228,6 +254,7 @@ if __name__ == "__main__":
     app.router.add_post("/set_auto_exposure", set_auto_exposure_handler)
     app.router.add_get("/capture", capture_handler)
     app.router.add_post("/analyze", analyze_handler)
+    app.router.add_post("/pause_camera", pause_camera_handler)
     # SDK routes
     app.router.add_get("/sdk/instant-reality.mjs", serve_sdk_library)
     app.router.add_get("/sdk/example.html", serve_sdk_example)

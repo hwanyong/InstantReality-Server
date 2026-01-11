@@ -120,6 +120,39 @@
             background: #6c757d;
             cursor: not-allowed;
         }
+
+        .btn-toggle-stream {
+            padding: 4px 8px;
+            font-size: 12px;
+            background: #28a745;
+        }
+
+        .btn-toggle-stream:hover {
+            background: #1e7e34;
+        }
+
+        .btn-toggle-stream.off {
+            background: #6c757d;
+        }
+
+        .btn-toggle-stream.off:hover {
+            background: #5a6268;
+        }
+
+        .video-container.paused video {
+            filter: brightness(0.3);
+        }
+
+        .video-container.paused::after {
+            content: 'PAUSED';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 1.5rem;
+            color: #888;
+            pointer-events: none;
+        }
     </style>
     <script type="module" src="client.mjs"></script>
 </head>
@@ -133,6 +166,9 @@
         <div class="video-container" data-cam-index="">
             <video autoplay playsinline muted></video>
             <div class="video-controls">
+                <div class="control-group">
+                    <button class="btn-toggle-stream" title="Toggle Stream">👁 On</button>
+                </div>
                 <div class="control-group">
                     <strong class="cam-label">Camera Focus:</strong>
                     <label>
