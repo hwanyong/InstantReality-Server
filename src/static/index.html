@@ -17,7 +17,6 @@
             display: flex;
             flex-direction: column;
             overflow: hidden;
-            /* Prevent scrolling if possible */
         }
 
         h1 {
@@ -40,21 +39,18 @@
             width: 100%;
             box-sizing: border-box;
             align-content: center;
-            /* Center grid vertically */
             justify-content: center;
         }
 
         @media (min-width: 900px) {
             .video-grid {
                 grid-template-columns: repeat(2, 1fr);
-                /* Removed forced row height */
             }
         }
 
         .video-container {
             position: relative;
             width: 100%;
-            /* Force 16:9 Aspect Ratio */
             aspect-ratio: 16 / 9;
             background: #000;
             border: 1px solid #333;
@@ -62,18 +58,15 @@
             flex-direction: column;
             overflow: hidden;
             margin: 0 auto;
-            /* Center if it doesn't fill */
         }
 
         video {
             width: 100%;
             height: 100%;
             object-fit: contain;
-            /* Maintain aspect ratio (no distortion) */
             flex-grow: 1;
         }
 
-        /* Overlay controls to maximize video space */
         .video-controls {
             position: absolute;
             bottom: 0;
@@ -88,7 +81,6 @@
             gap: 15px;
             font-size: 0.8rem;
             opacity: 0;
-            /* Hide by default, show on hover */
             transition: opacity 0.3s;
         }
 
@@ -96,7 +88,6 @@
             opacity: 1;
         }
 
-        /* Adjust control inputs for smaller size */
         .control-group {
             display: flex;
             align-items: center;
@@ -129,11 +120,6 @@
             background: #6c757d;
             cursor: not-allowed;
         }
-
-        #logs {
-            display: none;
-            /* Hide logs to verify clean UI */
-        }
     </style>
     <script type="module" src="client.mjs"></script>
 </head>
@@ -141,11 +127,7 @@
 <body>
     <h1>InstantReality Camera Stream</h1>
     <button id="streamBtn">Start Streaming</button>
-    <div class="video-grid" id="videoGrid">
-        <!-- Videos will be added here dynamically -->
-    </div>
-
-    <div id="logs"></div>
+    <div class="video-grid" id="videoGrid"></div>
 
     <template id="video-control-template">
         <div class="video-container" data-cam-index="">
@@ -180,7 +162,6 @@
             </div>
         </div>
     </template>
-
 </body>
 
 </html>

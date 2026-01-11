@@ -1,0 +1,200 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// InstantReality WebRTC Client Library
+// ESM Module for external services
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: Wait for ICE Gathering
+// ─────────────────────────────────────────────────────────────────────────────
+
+const waitForIceGathering = (pc, timeoutMs = 2000) => {
+    if (pc.iceGatheringState == 'complete') return Promise.resolve()
+
+    return new Promise(resolve => {
+        const cleanup = () => pc.removeEventListener('icecandidate', onCandidate)
+
+        const onCandidate = () => {
+            if (pc.iceGatheringState != 'complete') return
+            cleanup()
+            resolve()
+        }
+
+        pc.addEventListener('icecandidate', onCandidate)
+
+        setTimeout(() => {
+            console.warn('ICE gathering timed out, proceeding with available candidates')
+            cleanup()
+            resolve()
+        }, timeoutMs)
+    })
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// InstantReality Class
+// ─────────────────────────────────────────────────────────────────────────────
+
+export class InstantReality {
+    constructor(options = {}) {
+        this.serverUrl = options.serverUrl || ''
+        this.maxCameras = options.maxCameras || 4
+        this.iceServers = options.iceServers || [{ urls: 'stun:stun.l.google.com:19302' }]
+        this.pc = null
+        this.trackCounter = 0
+        this.listeners = {}
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // EventEmitter Methods
+    // ─────────────────────────────────────────────────────────────────────────
+
+    on(event, callback) {
+        if (!this.listeners[event]) {
+            this.listeners[event] = []
+        }
+        this.listeners[event].push(callback)
+        return this
+    }
+
+    off(event, callback) {
+        if (!this.listeners[event]) return this
+        this.listeners[event] = this.listeners[event].filter(cb => cb != callback)
+        return this
+    }
+
+    emit(event, ...args) {
+        if (!this.listeners[event]) return
+        this.listeners[event].forEach(callback => {
+            callback(...args)
+        })
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // WebRTC Core Methods
+    // ─────────────────────────────────────────────────────────────────────────
+
+    async connect() {
+        const config = {
+            sdpSemantics: 'unified-plan',
+            iceServers: this.iceServers
+        }
+
+        const pc = new RTCPeerConnection(config)
+        this.pc = pc
+        this.trackCounter = 0
+
+        pc.ontrack = (evt) => {
+            if (evt.track.kind != 'video') return
+            const cameraIndex = this.trackCounter++
+            this.emit('track', evt.track, cameraIndex)
+        }
+
+        pc.onconnectionstatechange = () => {
+            if (pc.connectionState == 'connected') {
+                this.emit('connected')
+            } else if (pc.connectionState == 'disconnected' || pc.connectionState == 'failed') {
+                this.emit('disconnected')
+            }
+        }
+
+        // Request video tracks
+        for (let i = 0; i < this.maxCameras; i++) {
+            pc.addTransceiver('video', { direction: 'recvonly' })
+        }
+
+        // SDP Negotiation
+        const offer = await pc.createOffer()
+        await pc.setLocalDescription(offer)
+
+        await waitForIceGathering(pc)
+
+        const response = await fetch(`${this.serverUrl}/offer`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                sdp: pc.localDescription.sdp,
+                type: pc.localDescription.type
+            })
+        })
+
+        if (!response.ok) {
+            const error = new Error(`Connection failed: ${response.status}`)
+            this.emit('error', error)
+            throw error
+        }
+
+        const answer = await response.json()
+        await pc.setRemoteDescription(answer)
+
+        return this
+    }
+
+    disconnect() {
+        if (this.pc) {
+            this.pc.close()
+            this.pc = null
+        }
+        this.emit('disconnected')
+        return this
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Camera Control Methods
+    // ─────────────────────────────────────────────────────────────────────────
+
+    async setFocus(cameraIndex, options = {}) {
+        const response = await fetch(`${this.serverUrl}/set_focus`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                camera_index: cameraIndex,
+                auto: options.auto ?? true,
+                value: options.value ?? 0
+            })
+        })
+        if (!response.ok) {
+            throw new Error('Failed to set focus')
+        }
+        return response.json()
+    }
+
+    async setExposure(cameraIndex, value) {
+        const response = await fetch(`${this.serverUrl}/set_exposure`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                camera_index: cameraIndex,
+                value: value
+            })
+        })
+        if (!response.ok) {
+            throw new Error('Failed to set exposure')
+        }
+        return response.json()
+    }
+
+    async setAutoExposure(cameraIndex, options = {}) {
+        const response = await fetch(`${this.serverUrl}/set_auto_exposure`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                camera_index: cameraIndex,
+                enabled: options.enabled ?? false,
+                target_brightness: options.targetBrightness ?? 128
+            })
+        })
+        if (!response.ok) {
+            throw new Error('Failed to set auto exposure')
+        }
+        return response.json()
+    }
+
+    async capture(cameraIndex) {
+        const response = await fetch(`${this.serverUrl}/capture?camera_index=${cameraIndex}`)
+        if (!response.ok) {
+            throw new Error('Capture failed')
+        }
+        return response.blob()
+    }
+}
+
+export default InstantReality

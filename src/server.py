@@ -15,6 +15,19 @@ from ai_engine import GeminiBrain
 pcs = set()
 brain = GeminiBrain()
 
+# CORS Middleware for cross-origin requests
+@web.middleware
+async def cors_middleware(request, handler):
+    if request.method == 'OPTIONS':
+        return web.Response(headers={
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+            'Access-Control-Allow-Headers': 'Content-Type'
+        })
+    response = await handler(request)
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    return response
+
 async def offer(request):
     params = await request.json()
     offer = RTCSessionDescription(sdp=params["sdp"], type=params["type"])
@@ -82,6 +95,14 @@ async def index(request):
 async def javascript(request):
     content = open(os.path.join("src/static", "client.mjs"), "r").read()
     return web.Response(content_type="application/javascript", text=content)
+
+async def serve_sdk_library(request):
+    content = open(os.path.join("src/sdk", "instant-reality.mjs"), "r").read()
+    return web.Response(content_type="application/javascript", text=content)
+
+async def serve_sdk_example(request):
+    content = open(os.path.join("src/sdk", "example.html"), "r").read()
+    return web.Response(content_type="text/html", text=content)
 
 async def set_focus_handler(request):
     try:
@@ -197,8 +218,8 @@ if __name__ == "__main__":
     else:
         print("Warning: No cameras found at startup!")
     
-    # 2. Setup Web Application
-    app = web.Application()
+    # 2. Setup Web Application with CORS middleware
+    app = web.Application(middlewares=[cors_middleware])
     app.router.add_get("/", index)
     app.router.add_get("/client.mjs", javascript)
     app.router.add_post("/offer", offer)
@@ -207,6 +228,9 @@ if __name__ == "__main__":
     app.router.add_post("/set_auto_exposure", set_auto_exposure_handler)
     app.router.add_get("/capture", capture_handler)
     app.router.add_post("/analyze", analyze_handler)
+    # SDK routes
+    app.router.add_get("/sdk/instant-reality.mjs", serve_sdk_library)
+    app.router.add_get("/sdk/example.html", serve_sdk_example)
     app.on_shutdown.append(on_shutdown)
     
     print("Server started at http://localhost:8080")
