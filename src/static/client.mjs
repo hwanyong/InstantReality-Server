@@ -1,295 +1,307 @@
-const state = {
-    pc: null,
-    trackCounter: 0
-}
+// ─────────────────────────────────────────────────────────────────────────────
+// Module State
+// ─────────────────────────────────────────────────────────────────────────────
 
-const dom = {
-    streamBtn: document.getElementById('streamBtn'),
-    videoGrid: document.getElementById('videoGrid'),
-    logs: document.getElementById('logs'),
-    template: document.getElementById('video-control-template')
-}
+let pc = null
+let trackCounter = 0
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DOM Elements
+// ─────────────────────────────────────────────────────────────────────────────
+
+const streamBtn = document.getElementById('streamBtn')
+const videoGrid = document.getElementById('videoGrid')
+const logsEl = document.getElementById('logs')
+const template = document.getElementById('video-control-template')
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper Functions
+// ─────────────────────────────────────────────────────────────────────────────
 
 const log = (msg) => {
-    dom.logs.innerText += msg + '\n'
+    logsEl.innerText += msg + '\n'
     console.log(msg)
 }
 
-const sendFocus = (camIndex, isAuto, value) => {
-    fetch('/set_focus', {
+const waitForIceGathering = (peerConnection, timeoutMs = 2000) => {
+    if (peerConnection.iceGatheringState == 'complete') return Promise.resolve()
+
+    return new Promise(resolve => {
+        const cleanup = () => peerConnection.removeEventListener('icecandidate', onCandidate)
+
+        const onCandidate = () => {
+            if (peerConnection.iceGatheringState != 'complete') return
+            cleanup()
+            resolve()
+        }
+
+        peerConnection.addEventListener('icecandidate', onCandidate)
+
+        setTimeout(() => {
+            console.warn('ICE gathering timed out, proceeding with available candidates')
+            cleanup()
+            resolve()
+        }, timeoutMs)
+    })
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// API Functions
+// ─────────────────────────────────────────────────────────────────────────────
+
+const sendFocus = async (camIndex, isAuto, value) => {
+    const response = await fetch('/set_focus', {
         method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
             camera_index: camIndex,
             auto: isAuto,
             value: parseInt(value)
-        }),
-    }).then(response => {
-        if (!response.ok) {
-            console.error('Failed to set focus')
-        }
+        })
     })
+    if (!response.ok) {
+        console.error('Failed to set focus')
+    }
 }
 
-const handleFocusInput = (e, camIndex, valSpan) => {
-    const val = e.target.value
-    valSpan.innerText = val
-    sendFocus(camIndex, false, val)
-}
-
-const handleAutoToggle = (e, camIndex, rngFocus) => {
-    const isAuto = e.target.checked
-    rngFocus.disabled = isAuto
-    sendFocus(camIndex, isAuto, rngFocus.value)
-}
-
-const sendExposure = (camIndex, value) => {
-    fetch('/set_exposure', {
+const sendExposure = async (camIndex, value) => {
+    const response = await fetch('/set_exposure', {
         method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
             camera_index: camIndex,
             value: parseInt(value)
-        }),
-    }).then(response => {
-        if (!response.ok) {
-            console.error('Failed to set exposure')
-        }
+        })
     })
+    if (!response.ok) {
+        console.error('Failed to set exposure')
+    }
 }
 
-const handleExposureInput = (e, camIndex, valSpan) => {
-    const val = e.target.value
-    valSpan.innerText = val
-    sendExposure(camIndex, val)
-}
-
-const sendAutoExposure = (camIndex, enabled, targetBrightness) => {
-    fetch('/set_auto_exposure', {
+const sendAutoExposure = async (camIndex, enabled, targetBrightness) => {
+    const response = await fetch('/set_auto_exposure', {
         method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
             camera_index: camIndex,
             enabled: enabled,
             target_brightness: parseInt(targetBrightness)
-        }),
-    }).then(response => {
-        if (!response.ok) {
-            console.error('Failed to set auto exposure')
-        }
+        })
     })
-}
-
-const handleAutoExposureToggle = (e, camIndex, rngExposure, rngTarget) => {
-    const isAuto = e.target.checked
-    rngExposure.disabled = isAuto
-    rngTarget.disabled = !isAuto
-    sendAutoExposure(camIndex, isAuto, rngTarget.value)
-}
-
-const handleTargetInput = (e, camIndex, valSpan) => {
-    const val = e.target.value
-    valSpan.innerText = val
-    sendAutoExposure(camIndex, true, val)
-}
-
-
-const handleCapture = async (camIndex) => {
-    try {
-        const response = await fetch(`/capture?camera_index=${camIndex}`)
-        if (!response.ok) {
-            console.error('Capture failed')
-            return
-        }
-
-        const blob = await response.blob()
-        const url = URL.createObjectURL(blob)
-
-        // Get filename from Content-Disposition header or generate default
-        const contentDisposition = response.headers.get('Content-Disposition')
-        let filename = `camera_${camIndex}_capture.jpg`
-        if (contentDisposition) {
-            const match = contentDisposition.match(/filename="(.+)"/)
-            if (match) filename = match[1]
-        }
-
-        // Trigger download
-        const a = document.createElement('a')
-        a.href = url
-        a.download = filename
-        document.body.appendChild(a)
-        a.click()
-        document.body.removeChild(a)
-
-        URL.revokeObjectURL(url)
-        log(`Captured Camera ${camIndex}: ${filename}`)
-    } catch (e) {
-        console.error('Capture error:', e)
+    if (!response.ok) {
+        console.error('Failed to set auto exposure')
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Event Handlers
+// ─────────────────────────────────────────────────────────────────────────────
+
+const handleFocusInput = async (e) => {
+    const container = e.target.closest('.video-container')
+    const camIndex = parseInt(container.dataset.camIndex)
+    const valSpan = container.querySelector('.val-focus')
+
+    const val = e.target.value
+    valSpan.innerText = val
+    await sendFocus(camIndex, false, val)
+}
+
+const handleAutoToggle = async (e) => {
+    const container = e.target.closest('.video-container')
+    const camIndex = parseInt(container.dataset.camIndex)
+    const rngFocus = container.querySelector('.rng-focus')
+
+    const isAuto = e.target.checked
+    rngFocus.disabled = isAuto
+    await sendFocus(camIndex, isAuto, rngFocus.value)
+}
+
+const handleExposureInput = async (e) => {
+    const container = e.target.closest('.video-container')
+    const camIndex = parseInt(container.dataset.camIndex)
+    const valSpan = container.querySelector('.val-exposure')
+
+    const val = e.target.value
+    valSpan.innerText = val
+    await sendExposure(camIndex, val)
+}
+
+const handleAutoExposureToggle = async (e) => {
+    const container = e.target.closest('.video-container')
+    const camIndex = parseInt(container.dataset.camIndex)
+    const rngExposure = container.querySelector('.rng-exposure')
+    const rngTarget = container.querySelector('.rng-target')
+
+    const isAuto = e.target.checked
+    rngExposure.disabled = isAuto
+    rngTarget.disabled = !isAuto
+    await sendAutoExposure(camIndex, isAuto, rngTarget.value)
+}
+
+const handleTargetInput = async (e) => {
+    const container = e.target.closest('.video-container')
+    const camIndex = parseInt(container.dataset.camIndex)
+    const valSpan = container.querySelector('.val-target')
+
+    const val = e.target.value
+    valSpan.innerText = val
+    await sendAutoExposure(camIndex, true, val)
+}
+
+const handleCapture = async (e) => {
+    const container = e.target.closest('.video-container')
+    const camIndex = parseInt(container.dataset.camIndex)
+
+    const response = await fetch(`/capture?camera_index=${camIndex}`)
+    if (!response.ok) {
+        console.error('Capture failed')
+        return
+    }
+
+    const blob = await response.blob()
+    const url = URL.createObjectURL(blob)
+
+    // Get filename from Content-Disposition header or generate default
+    const contentDisposition = response.headers.get('Content-Disposition')
+    let filename = `camera_${camIndex}_capture.jpg`
+    if (contentDisposition) {
+        const match = contentDisposition.match(/filename="(.+)"/)
+        if (match) filename = match[1]
+    }
+
+    // Trigger download
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+
+    URL.revokeObjectURL(url)
+    log(`Captured Camera ${camIndex}: ${filename}`)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Video Card Creation
+// ─────────────────────────────────────────────────────────────────────────────
+
 const createVideoCard = (track) => {
-    const camIndex = state.trackCounter++
+    const camIndex = trackCounter++
     log(`Assigning Camera Index: ${camIndex}`)
 
-    const clone = dom.template.content.cloneNode(true)
+    const clone = template.content.cloneNode(true)
 
     const label = clone.querySelector('.cam-label')
     label.innerText = `Camera ${camIndex} Focus:`
 
-    const chkAuto = clone.querySelector('.chk-auto')
-    const rngFocus = clone.querySelector('.rng-focus')
-    const valSpan = clone.querySelector('.val-focus')
-
-    chkAuto.addEventListener('change', (e) => handleAutoToggle(e, camIndex, rngFocus))
-    rngFocus.addEventListener('input', (e) => handleFocusInput(e, camIndex, valSpan))
-
-    // Exposure slider handler
-    const rngExposure = clone.querySelector('.rng-exposure')
-    const valExposure = clone.querySelector('.val-exposure')
-    rngExposure.addEventListener('input', (e) => handleExposureInput(e, camIndex, valExposure))
-
-    // Auto Exposure toggle and Target slider handlers
-    const chkAutoExp = clone.querySelector('.chk-auto-exp')
-    const rngTarget = clone.querySelector('.rng-target')
-    const valTarget = clone.querySelector('.val-target')
-
-    chkAutoExp.addEventListener('change', (e) => handleAutoExposureToggle(e, camIndex, rngExposure, rngTarget))
-    rngTarget.addEventListener('input', (e) => handleTargetInput(e, camIndex, valTarget))
-
-    // Capture button handler
-    const btnCapture = clone.querySelector('.btn-capture')
-    btnCapture.addEventListener('click', () => handleCapture(camIndex))
+    // Event listeners
+    clone.querySelector('.chk-auto').addEventListener('change', handleAutoToggle)
+    clone.querySelector('.rng-focus').addEventListener('input', handleFocusInput)
+    clone.querySelector('.rng-exposure').addEventListener('input', handleExposureInput)
+    clone.querySelector('.chk-auto-exp').addEventListener('change', handleAutoExposureToggle)
+    clone.querySelector('.rng-target').addEventListener('input', handleTargetInput)
+    clone.querySelector('.btn-capture').addEventListener('click', handleCapture)
 
     // Safari fix: Append to DOM FIRST, then set srcObject and play
-    dom.videoGrid.appendChild(clone)
+    videoGrid.appendChild(clone)
 
-    // Now get the video element that's actually in the DOM (not the template clone)
-    const videoContainers = dom.videoGrid.querySelectorAll('.video-container')
+    // Get the last appended container
+    const videoContainers = videoGrid.querySelectorAll('.video-container')
     const lastContainer = videoContainers[videoContainers.length - 1]
-    const videoEl = lastContainer.querySelector('video')
 
+    // Set data attribute for event handlers
+    lastContainer.dataset.camIndex = camIndex
+
+    const videoEl = lastContainer.querySelector('video')
     videoEl.srcObject = new MediaStream([track])
 
     // Safari workaround: explicit play() call after element is in DOM
     videoEl.play().catch(e => console.warn('Autoplay failed:', e))
 }
 
-const onTrack = (evt) => {
-    log(`Track received: ${evt.track.kind}`)
-    if (evt.track.kind !== 'video') {
-        return
-    }
-    createVideoCard(evt.track)
+// ─────────────────────────────────────────────────────────────────────────────
+// WebRTC Core Functions
+// ─────────────────────────────────────────────────────────────────────────────
+
+const handleNegotiation = async (peerConnection) => {
+    const offer = await peerConnection.createOffer()
+    await peerConnection.setLocalDescription(offer)
+
+    await waitForIceGathering(peerConnection)
+
+    const response = await fetch('/offer', {
+        body: JSON.stringify({
+            sdp: peerConnection.localDescription.sdp,
+            type: peerConnection.localDescription.type
+        }),
+        headers: { 'Content-Type': 'application/json' },
+        method: 'POST'
+    })
+
+    const answer = await response.json()
+    await peerConnection.setRemoteDescription(answer)
+
+    streamBtn.innerText = 'Stop Streaming'
+    streamBtn.className = 'btn-stop'
+    streamBtn.disabled = false
 }
 
-const stopStream = () => {
-    if (state.pc) {
-        state.pc.close()
-        state.pc = null
-    }
-
-    dom.videoGrid.innerHTML = ''
-    dom.streamBtn.innerText = 'Start Streaming'
-    dom.streamBtn.className = ''
-    dom.streamBtn.disabled = false
-    log('Streaming stopped.')
-}
-
-const handleNegotiation = (pc) => {
-    pc.createOffer()
-        .then(offer => pc.setLocalDescription(offer))
-        .then(() => {
-            return new Promise(resolve => {
-                if (pc.iceGatheringState === 'complete') {
-                    resolve()
-                    return
-                }
-
-                const checkState = () => {
-                    if (pc.iceGatheringState === 'complete') {
-                        pc.removeEventListener('icecandidate', checkState)
-                        resolve()
-                    }
-                }
-                pc.addEventListener('icecandidate', checkState)
-
-                // Safari workaround: ICE gathering often hangs and never reaches 'complete'
-                // Proceed with whatever candidates we have after 2 seconds
-                setTimeout(() => {
-                    if (pc.iceGatheringState !== 'complete') {
-                        console.warn('ICE gathering timed out, sending available candidates')
-                        pc.removeEventListener('icecandidate', checkState)
-                        resolve()
-                    }
-                }, 2000)
-            })
-        })
-        .then(() => {
-            const offer = pc.localDescription
-            return fetch('/offer', {
-                body: JSON.stringify({
-                    sdp: offer.sdp,
-                    type: offer.type,
-                }),
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                method: 'POST'
-            })
-        })
-        .then(response => response.json())
-        .then(answer => {
-            dom.streamBtn.innerText = 'Stop Streaming'
-            dom.streamBtn.className = 'btn-stop'
-            dom.streamBtn.disabled = false
-            return pc.setRemoteDescription(answer)
-        })
-        .catch(e => {
-            dom.streamBtn.innerText = 'Start Streaming'
-            dom.streamBtn.className = ''
-            dom.streamBtn.disabled = false
-            alert(e)
-        })
-}
-
-const startStream = () => {
-    dom.streamBtn.disabled = true
-    dom.streamBtn.innerText = 'Connecting...'
+const startStream = async () => {
+    streamBtn.disabled = true
+    streamBtn.innerText = 'Connecting...'
 
     const config = {
         sdpSemantics: 'unified-plan',
         iceServers: [{ urls: ['stun:stun.l.google.com:19302'] }]
     }
 
-    const pc = new RTCPeerConnection(config)
-    state.pc = pc
-    state.trackCounter = 0
+    const peerConnection = new RTCPeerConnection(config)
+    pc = peerConnection
+    trackCounter = 0
 
-    pc.ontrack = onTrack
-
-    // Support up to 4 cameras dynamically
-    // We offer to receive 4 video tracks. The server will only use what it has.
-    for (let i = 0; i < 4; i++) {
-        pc.addTransceiver('video', { direction: 'recvonly' })
+    peerConnection.ontrack = (evt) => {
+        log(`Track received: ${evt.track.kind}`)
+        if (evt.track.kind != 'video') return
+        createVideoCard(evt.track)
     }
 
-    handleNegotiation(pc)
+    // Support up to 4 cameras dynamically
+    for (let i = 0; i < 4; i++) {
+        peerConnection.addTransceiver('video', { direction: 'recvonly' })
+    }
+
+    await handleNegotiation(peerConnection).catch(e => {
+        streamBtn.innerText = 'Start Streaming'
+        streamBtn.className = ''
+        streamBtn.disabled = false
+        alert(e)
+    })
+}
+
+const stopStream = () => {
+    if (pc) {
+        pc.close()
+        pc = null
+    }
+
+    videoGrid.innerHTML = ''
+    streamBtn.innerText = 'Start Streaming'
+    streamBtn.className = ''
+    streamBtn.disabled = false
+    log('Streaming stopped.')
 }
 
 const toggleStream = () => {
-    if (state.pc) {
+    if (pc) {
         stopStream()
     } else {
         startStream()
     }
 }
 
-// Init
-dom.streamBtn.addEventListener('click', toggleStream)
+// ─────────────────────────────────────────────────────────────────────────────
+// Initialize
+// ─────────────────────────────────────────────────────────────────────────────
+
+streamBtn.addEventListener('click', toggleStream)
