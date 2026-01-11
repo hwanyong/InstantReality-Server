@@ -113,6 +113,10 @@ async def serve_sdk_example(request):
     content = open(os.path.join("src/sdk", "example.html"), "r", encoding="utf-8").read()
     return web.Response(content_type="text/html", text=content)
 
+async def serve_sdk_types(request):
+    content = open(os.path.join("src/sdk", "instant-reality.d.ts"), "r", encoding="utf-8").read()
+    return web.Response(content_type="application/typescript", text=content)
+
 async def set_focus_handler(request):
     try:
         data = await request.json()
@@ -257,6 +261,7 @@ if __name__ == "__main__":
     app.router.add_post("/pause_camera", pause_camera_handler)
     # SDK routes
     app.router.add_get("/sdk/instant-reality.mjs", serve_sdk_library)
+    app.router.add_get("/sdk/instant-reality.d.ts", serve_sdk_types)
     app.router.add_get("/sdk/example.html", serve_sdk_example)
     app.on_shutdown.append(on_shutdown)
     
