@@ -48,6 +48,11 @@ class ServoState:
         with self._lock:
             self.last_sent_angles[channel] = angle
 
+    def clear_history(self):
+        """Clear sent history to force updates on next command."""
+        with self._lock:
+            self.last_sent_angles.clear()
+
 
 class CalibratorGUI:
     """
@@ -88,6 +93,7 @@ class CalibratorGUI:
         self.min_pos_vars = {}
         self.min_pos_combos = {}  # Store ComboBox references for dynamic update
         self.length_vars = {}
+        self.constrain_var = None  # Slider constraint toggle
 
         # Build UI
         self._create_styles()
@@ -285,6 +291,11 @@ class CalibratorGUI:
         ttk.Separator(frame, orient=tk.VERTICAL).pack(side=tk.LEFT, padx=10, fill=tk.Y)
         ttk.Button(frame, text="Set Home", command=self._on_set_home).pack(side=tk.LEFT, padx=5)
         ttk.Button(frame, text="Go Home", command=self._on_go_home).pack(side=tk.LEFT, padx=5)
+        
+        # Slider constraint toggle
+        ttk.Separator(frame, orient=tk.VERTICAL).pack(side=tk.LEFT, padx=10, fill=tk.Y)
+        self.constrain_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(frame, text="Limit to Min/Max", variable=self.constrain_var, command=self._on_constrain_toggle).pack(side=tk.LEFT, padx=5)
 
     def _refresh_ports(self):
         """Refresh available COM ports."""
@@ -399,6 +410,35 @@ class CalibratorGUI:
             "gripper": "open"
         }
         return defaults.get(type_value, "bottom")
+
+    def _on_constrain_toggle(self):
+        """Toggle slider constraints between full range and Min/Max limits."""
+        constrained = self.constrain_var.get()
+        
+        for arm in ["left_arm", "right_arm"]:
+            for slot in range(1, 7):
+                slider = self.sliders[(arm, slot)]
+                limits = self.manager.get_limits(arm, slot)
+                min_limit = limits["min"]
+                max_limit = limits["max"]
+                
+                if constrained:
+                    # Constrain slider to Min/Max
+                    slider.configure(from_=min_limit, to=max_limit)
+                    
+                    # Clamp current value if outside limits
+                    current = self.angle_vars[(arm, slot)].get()
+                    if current < min_limit:
+                        self.angle_vars[(arm, slot)].set(min_limit)
+                        channel = self.manager.get_channel(arm, slot)
+                        self.servo_state.update_angle(channel, min_limit)
+                    elif current > max_limit:
+                        self.angle_vars[(arm, slot)].set(max_limit)
+                        channel = self.manager.get_channel(arm, slot)
+                        self.servo_state.update_angle(channel, max_limit)
+                else:
+                    # Reset to full range
+                    slider.configure(from_=0, to=180)
 
     def _on_type_change(self, arm, slot):
         """Handle type dropdown change. Updates min_pos options dynamically."""
@@ -520,6 +560,9 @@ class CalibratorGUI:
             messagebox.showwarning("Warning", "Not connected to hardware")
             return
         
+        # Force updates even if software thinks it's at the same position
+        self.servo_state.clear_history()
+        
         for arm in ["left_arm", "right_arm"]:
             for slot in range(1, 7):
                 initial_angle = self.manager.get_initial(arm, slot)
@@ -536,6 +579,8 @@ class CalibratorGUI:
         if self.is_connected:
             self.driver.release_all()
         self.sine_test_running = False
+        # Clear history so next commands will be sent even if angle unchanged
+        self.servo_state.clear_history()
         messagebox.showinfo("E-STOP", "All servos released")
 
     def _on_close(self):
