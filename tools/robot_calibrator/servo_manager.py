@@ -14,20 +14,20 @@ class ServoManager:
 
     DEFAULT_CONFIG = {
         "left_arm": {
-            "slot_1": {"channel": 0, "min": 0, "max": 180},
-            "slot_2": {"channel": 1, "min": 0, "max": 180},
-            "slot_3": {"channel": 2, "min": 0, "max": 180},
-            "slot_4": {"channel": 3, "min": 0, "max": 180},
-            "slot_5": {"channel": 4, "min": 0, "max": 180},
-            "slot_6": {"channel": 5, "min": 0, "max": 180}
+            "slot_1": {"channel": 0, "min": 0, "max": 180, "type": "vertical", "min_pos": "bottom", "length": 0, "initial": 90},
+            "slot_2": {"channel": 1, "min": 0, "max": 180, "type": "vertical", "min_pos": "bottom", "length": 0, "initial": 90},
+            "slot_3": {"channel": 2, "min": 0, "max": 180, "type": "vertical", "min_pos": "bottom", "length": 0, "initial": 90},
+            "slot_4": {"channel": 3, "min": 0, "max": 180, "type": "vertical", "min_pos": "bottom", "length": 0, "initial": 90},
+            "slot_5": {"channel": 4, "min": 0, "max": 180, "type": "vertical", "min_pos": "bottom", "length": 0, "initial": 90},
+            "slot_6": {"channel": 5, "min": 0, "max": 180, "type": "vertical", "min_pos": "bottom", "length": 0, "initial": 90}
         },
         "right_arm": {
-            "slot_1": {"channel": 6, "min": 0, "max": 180},
-            "slot_2": {"channel": 7, "min": 0, "max": 180},
-            "slot_3": {"channel": 8, "min": 0, "max": 180},
-            "slot_4": {"channel": 9, "min": 0, "max": 180},
-            "slot_5": {"channel": 10, "min": 0, "max": 180},
-            "slot_6": {"channel": 11, "min": 0, "max": 180}
+            "slot_1": {"channel": 6, "min": 0, "max": 180, "type": "vertical", "min_pos": "bottom", "length": 0, "initial": 90},
+            "slot_2": {"channel": 7, "min": 0, "max": 180, "type": "vertical", "min_pos": "bottom", "length": 0, "initial": 90},
+            "slot_3": {"channel": 8, "min": 0, "max": 180, "type": "vertical", "min_pos": "bottom", "length": 0, "initial": 90},
+            "slot_4": {"channel": 9, "min": 0, "max": 180, "type": "vertical", "min_pos": "bottom", "length": 0, "initial": 90},
+            "slot_5": {"channel": 10, "min": 0, "max": 180, "type": "vertical", "min_pos": "bottom", "length": 0, "initial": 90},
+            "slot_6": {"channel": 11, "min": 0, "max": 180, "type": "vertical", "min_pos": "bottom", "length": 0, "initial": 90}
         },
         "connection": {
             "port": ""
@@ -95,7 +95,7 @@ class ServoManager:
         if arm not in self.config:
             self.config[arm] = {}
         if slot_key not in self.config[arm]:
-            self.config[arm][slot_key] = {"channel": 0, "min": 0, "max": 180}
+            self.config[arm][slot_key] = {"channel": 0, "min": 0, "max": 180, "type": "vertical", "min_pos": "bottom", "length": 0}
         self.config[arm][slot_key]["channel"] = channel
 
     def get_limits(self, arm, slot):
@@ -130,7 +130,7 @@ class ServoManager:
         if arm not in self.config:
             self.config[arm] = {}
         if slot_key not in self.config[arm]:
-            self.config[arm][slot_key] = {"channel": 0, "min": 0, "max": 180}
+            self.config[arm][slot_key] = {"channel": 0, "min": 0, "max": 180, "type": "vertical", "min_pos": "bottom", "length": 0}
         self.config[arm][slot_key][limit_type] = value
 
     def get_saved_port(self):
@@ -142,6 +142,123 @@ class ServoManager:
         if "connection" not in self.config:
             self.config["connection"] = {}
         self.config["connection"]["port"] = port
+
+    # ========== Kinematics Properties ==========
+
+    def get_type(self, arm, slot):
+        """
+        Get movement type for a given slot.
+
+        Args:
+            arm: 'left_arm' or 'right_arm'
+            slot: Slot number (1-6)
+
+        Returns:
+            str: 'vertical' or 'horizontal'
+        """
+        slot_key = f"slot_{slot}"
+        return self.config.get(arm, {}).get(slot_key, {}).get("type", "vertical")
+
+    def set_type(self, arm, slot, value):
+        """
+        Set movement type for a given slot.
+
+        Args:
+            arm: 'left_arm' or 'right_arm'
+            slot: Slot number (1-6)
+            value: 'vertical' or 'horizontal'
+        """
+        slot_key = f"slot_{slot}"
+        self._ensure_slot_exists(arm, slot_key)
+        self.config[arm][slot_key]["type"] = value
+
+    def get_min_pos(self, arm, slot):
+        """
+        Get min angle position indicator for a given slot.
+
+        Args:
+            arm: 'left_arm' or 'right_arm'
+            slot: Slot number (1-6)
+
+        Returns:
+            str: For vertical: 'top'/'bottom', For horizontal: 'left'/'right'
+        """
+        slot_key = f"slot_{slot}"
+        return self.config.get(arm, {}).get(slot_key, {}).get("min_pos", "bottom")
+
+    def set_min_pos(self, arm, slot, value):
+        """
+        Set min angle position indicator for a given slot.
+
+        Args:
+            arm: 'left_arm' or 'right_arm'
+            slot: Slot number (1-6)
+            value: For vertical: 'top'/'bottom', For horizontal: 'left'/'right'
+        """
+        slot_key = f"slot_{slot}"
+        self._ensure_slot_exists(arm, slot_key)
+        self.config[arm][slot_key]["min_pos"] = value
+
+    def get_length(self, arm, slot):
+        """
+        Get link length to next joint for a given slot.
+
+        Args:
+            arm: 'left_arm' or 'right_arm'
+            slot: Slot number (1-6)
+
+        Returns:
+            float: Distance in mm
+        """
+        slot_key = f"slot_{slot}"
+        return self.config.get(arm, {}).get(slot_key, {}).get("length", 0)
+
+    def set_length(self, arm, slot, value):
+        """
+        Set link length to next joint for a given slot.
+
+        Args:
+            arm: 'left_arm' or 'right_arm'
+            slot: Slot number (1-6)
+            value: Distance in mm
+        """
+        slot_key = f"slot_{slot}"
+        self._ensure_slot_exists(arm, slot_key)
+        self.config[arm][slot_key]["length"] = value
+
+    def _ensure_slot_exists(self, arm, slot_key):
+        """Helper to ensure arm and slot exist in config."""
+        if arm not in self.config:
+            self.config[arm] = {}
+        if slot_key not in self.config[arm]:
+            self.config[arm][slot_key] = {"channel": 0, "min": 0, "max": 180, "type": "vertical", "min_pos": "bottom", "length": 0, "initial": 90}
+
+    def get_initial(self, arm, slot):
+        """
+        Get initial (home) position angle for a given slot.
+
+        Args:
+            arm: 'left_arm' or 'right_arm'
+            slot: Slot number (1-6)
+
+        Returns:
+            int: Initial angle (0-180)
+        """
+        slot_key = f"slot_{slot}"
+        return self.config.get(arm, {}).get(slot_key, {}).get("initial", 90)
+
+    def set_initial(self, arm, slot, value):
+        """
+        Set initial (home) position angle for a given slot.
+
+        Args:
+            arm: 'left_arm' or 'right_arm'
+            slot: Slot number (1-6)
+            value: Angle (0-180)
+        """
+        slot_key = f"slot_{slot}"
+        self._ensure_slot_exists(arm, slot_key)
+        self.config[arm][slot_key]["initial"] = value
 
     def get_all_slots(self):
         """

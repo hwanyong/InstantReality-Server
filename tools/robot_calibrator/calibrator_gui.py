@@ -83,6 +83,11 @@ class CalibratorGUI:
         self.angle_vars = {}
         self.min_labels = {}
         self.max_labels = {}
+        # Kinematics UI variables
+        self.type_vars = {}
+        self.min_pos_vars = {}
+        self.min_pos_combos = {}  # Store ComboBox references for dynamic update
+        self.length_vars = {}
 
         # Build UI
         self._create_styles()
@@ -152,19 +157,24 @@ class CalibratorGUI:
         self._create_arm_controls(right_frame, "right_arm", range(1, 7))
 
     def _create_arm_controls(self, parent, arm_key, slots):
-        """Create control widgets for one arm."""
+        """Create control widgets for one arm with kinematics settings."""
         for i, slot in enumerate(slots):
-            frame = ttk.Frame(parent)
-            frame.pack(fill=tk.X, pady=5)
+            # Container for 2-row layout
+            slot_container = ttk.Frame(parent)
+            slot_container.pack(fill=tk.X, pady=3)
+
+            # === Row 1: Servo Control ===
+            row1 = ttk.Frame(slot_container)
+            row1.pack(fill=tk.X)
 
             # Slot label
-            ttk.Label(frame, text=f"Slot {slot}:", width=8).pack(side=tk.LEFT)
+            ttk.Label(row1, text=f"Slot {slot}:", width=8).pack(side=tk.LEFT)
 
             # Channel dropdown
             ch_var = tk.IntVar(value=self.manager.get_channel(arm_key, slot))
             self.channel_vars[(arm_key, slot)] = ch_var
 
-            ch_combo = ttk.Combobox(frame, textvariable=ch_var, values=list(range(16)), width=5)
+            ch_combo = ttk.Combobox(row1, textvariable=ch_var, values=list(range(16)), width=5)
             ch_combo.pack(side=tk.LEFT, padx=5)
             ch_combo.bind("<<ComboboxSelected>>", lambda e, a=arm_key, s=slot: self._on_channel_change(a, s))
 
@@ -173,15 +183,15 @@ class CalibratorGUI:
             self.angle_vars[(arm_key, slot)] = angle_var
 
             slider = ttk.Scale(
-                frame, from_=0, to=180, variable=angle_var, orient=tk.HORIZONTAL, length=200,
+                row1, from_=0, to=180, variable=angle_var, orient=tk.HORIZONTAL, length=200,
                 command=lambda v, a=arm_key, s=slot: self._on_slider_change(a, s, v)
             )
             slider.pack(side=tk.LEFT, padx=10)
             self.sliders[(arm_key, slot)] = slider
 
             # Angle display
-            ttk.Label(frame, textvariable=angle_var, width=4).pack(side=tk.LEFT)
-            ttk.Label(frame, text="°").pack(side=tk.LEFT)
+            ttk.Label(row1, textvariable=angle_var, width=4).pack(side=tk.LEFT)
+            ttk.Label(row1, text="°").pack(side=tk.LEFT)
 
             # Min/Max buttons and labels
             limits = self.manager.get_limits(arm_key, slot)
@@ -191,13 +201,52 @@ class CalibratorGUI:
             self.min_labels[(arm_key, slot)] = min_label
             self.max_labels[(arm_key, slot)] = max_label
 
-            ttk.Button(frame, text="Set Min", width=8,
+            ttk.Button(row1, text="Set Min", width=8,
                        command=lambda a=arm_key, s=slot: self._on_set_min(a, s)).pack(side=tk.LEFT, padx=2)
-            ttk.Label(frame, textvariable=min_label, width=4).pack(side=tk.LEFT)
+            ttk.Label(row1, textvariable=min_label, width=4).pack(side=tk.LEFT)
 
-            ttk.Button(frame, text="Set Max", width=8,
+            ttk.Button(row1, text="Set Max", width=8,
                        command=lambda a=arm_key, s=slot: self._on_set_max(a, s)).pack(side=tk.LEFT, padx=2)
-            ttk.Label(frame, textvariable=max_label, width=4).pack(side=tk.LEFT)
+            ttk.Label(row1, textvariable=max_label, width=4).pack(side=tk.LEFT)
+
+            # === Row 2: Kinematics Settings ===
+            row2 = ttk.Frame(slot_container)
+            row2.pack(fill=tk.X, pady=(2, 0))
+
+            # Spacer to align with row 1
+            ttk.Label(row2, text="", width=8).pack(side=tk.LEFT)
+
+            # Type dropdown (Vertical/Horizontal/Roll/Gripper)
+            ttk.Label(row2, text="Type:").pack(side=tk.LEFT, padx=(5, 2))
+            type_var = tk.StringVar(value=self.manager.get_type(arm_key, slot))
+            self.type_vars[(arm_key, slot)] = type_var
+            type_combo = ttk.Combobox(row2, textvariable=type_var, values=["vertical", "horizontal", "roll", "gripper"], width=10, state="readonly")
+            type_combo.pack(side=tk.LEFT, padx=2)
+            type_combo.bind("<<ComboboxSelected>>", lambda e, a=arm_key, s=slot: self._on_type_change(a, s))
+
+            # Min Position dropdown (dynamic based on type)
+            ttk.Label(row2, text="Min Pos:").pack(side=tk.LEFT, padx=(10, 2))
+            min_pos_var = tk.StringVar(value=self.manager.get_min_pos(arm_key, slot))
+            self.min_pos_vars[(arm_key, slot)] = min_pos_var
+            
+            # Determine initial options based on type
+            current_type = self.manager.get_type(arm_key, slot)
+            min_pos_options = self._get_min_pos_options(current_type)
+            
+            min_pos_combo = ttk.Combobox(row2, textvariable=min_pos_var, values=min_pos_options, width=8, state="readonly")
+            min_pos_combo.pack(side=tk.LEFT, padx=2)
+            min_pos_combo.bind("<<ComboboxSelected>>", lambda e, a=arm_key, s=slot: self._on_min_pos_change(a, s))
+            self.min_pos_combos[(arm_key, slot)] = min_pos_combo
+
+            # Length entry (mm)
+            ttk.Label(row2, text="Length:").pack(side=tk.LEFT, padx=(10, 2))
+            length_var = tk.StringVar(value=str(self.manager.get_length(arm_key, slot)))
+            self.length_vars[(arm_key, slot)] = length_var
+            length_entry = ttk.Entry(row2, textvariable=length_var, width=8)
+            length_entry.pack(side=tk.LEFT, padx=2)
+            length_entry.bind("<FocusOut>", lambda e, a=arm_key, s=slot: self._on_length_change(a, s))
+            length_entry.bind("<Return>", lambda e, a=arm_key, s=slot: self._on_length_change(a, s))
+            ttk.Label(row2, text="mm").pack(side=tk.LEFT)
 
     def _create_diagnostics_panel(self):
         """Create diagnostics panel."""
@@ -231,6 +280,11 @@ class CalibratorGUI:
         # Save/Load config
         ttk.Button(frame, text="Save Config", command=self._on_save_config).pack(side=tk.LEFT, padx=5)
         ttk.Button(frame, text="Load Config", command=self._on_load_config).pack(side=tk.LEFT, padx=5)
+        
+        # Home position controls
+        ttk.Separator(frame, orient=tk.VERTICAL).pack(side=tk.LEFT, padx=10, fill=tk.Y)
+        ttk.Button(frame, text="Set Home", command=self._on_set_home).pack(side=tk.LEFT, padx=5)
+        ttk.Button(frame, text="Go Home", command=self._on_go_home).pack(side=tk.LEFT, padx=5)
 
     def _refresh_ports(self):
         """Refresh available COM ports."""
@@ -324,6 +378,60 @@ class CalibratorGUI:
         self.manager.set_limit(arm, slot, "max", current_angle)
         self.max_labels[(arm, slot)].set(str(current_angle))
 
+    def _get_min_pos_options(self, type_value):
+        """Get min_pos options based on joint type."""
+        if type_value == "vertical":
+            return ["top", "bottom"]
+        elif type_value == "horizontal":
+            return ["left", "right"]
+        elif type_value == "roll":
+            return ["cw", "ccw"]
+        elif type_value == "gripper":
+            return ["open", "close"]
+        return ["bottom"]  # fallback
+
+    def _get_default_min_pos(self, type_value):
+        """Get default min_pos for a joint type."""
+        defaults = {
+            "vertical": "bottom",
+            "horizontal": "left",
+            "roll": "cw",
+            "gripper": "open"
+        }
+        return defaults.get(type_value, "bottom")
+
+    def _on_type_change(self, arm, slot):
+        """Handle type dropdown change. Updates min_pos options dynamically."""
+        new_type = self.type_vars[(arm, slot)].get()
+        self.manager.set_type(arm, slot, new_type)
+        
+        # Update min_pos combo options based on new type
+        combo = self.min_pos_combos[(arm, slot)]
+        new_options = self._get_min_pos_options(new_type)
+        default_pos = self._get_default_min_pos(new_type)
+        
+        combo['values'] = new_options
+        # Reset to default if current value is not valid for new type
+        current_pos = self.min_pos_vars[(arm, slot)].get()
+        if current_pos not in new_options:
+            self.min_pos_vars[(arm, slot)].set(default_pos)
+            self.manager.set_min_pos(arm, slot, default_pos)
+
+    def _on_min_pos_change(self, arm, slot):
+        """Handle min position dropdown change."""
+        new_min_pos = self.min_pos_vars[(arm, slot)].get()
+        self.manager.set_min_pos(arm, slot, new_min_pos)
+
+    def _on_length_change(self, arm, slot):
+        """Handle length entry change."""
+        length_str = self.length_vars[(arm, slot)].get()
+        try:
+            length = float(length_str)
+            self.manager.set_length(arm, slot, length)
+        except ValueError:
+            # Invalid input, reset to saved value
+            self.length_vars[(arm, slot)].set(str(self.manager.get_length(arm, slot)))
+
     def _on_sine_test(self):
         """Start/stop sine wave test."""
         if self.sine_test_running:
@@ -379,8 +487,49 @@ class CalibratorGUI:
                 limits = self.manager.get_limits(arm, slot)
                 self.min_labels[(arm, slot)].set(str(limits["min"]))
                 self.max_labels[(arm, slot)].set(str(limits["max"]))
+                
+                # Update kinematics fields
+                loaded_type = self.manager.get_type(arm, slot)
+                self.type_vars[(arm, slot)].set(loaded_type)
+                
+                # Update min_pos options and value
+                combo = self.min_pos_combos[(arm, slot)]
+                combo['values'] = self._get_min_pos_options(loaded_type)
+                self.min_pos_vars[(arm, slot)].set(self.manager.get_min_pos(arm, slot))
+                
+                self.length_vars[(arm, slot)].set(str(self.manager.get_length(arm, slot)))
 
         messagebox.showinfo("Success", "Configuration loaded")
+
+    def _on_set_home(self):
+        """Save current slider positions as home (initial) position for all joints."""
+        for arm in ["left_arm", "right_arm"]:
+            for slot in range(1, 7):
+                current_angle = self.angle_vars[(arm, slot)].get()
+                self.manager.set_initial(arm, slot, current_angle)
+        
+        # Auto-save config
+        if self.manager.save_config():
+            messagebox.showinfo("Set Home", "Home position saved successfully!")
+        else:
+            messagebox.showerror("Error", "Failed to save home position")
+
+    def _on_go_home(self):
+        """Move all joints to their saved home (initial) positions."""
+        if not self.is_connected:
+            messagebox.showwarning("Warning", "Not connected to hardware")
+            return
+        
+        for arm in ["left_arm", "right_arm"]:
+            for slot in range(1, 7):
+                initial_angle = self.manager.get_initial(arm, slot)
+                channel = self.manager.get_channel(arm, slot)
+                
+                # Update UI slider
+                self.angle_vars[(arm, slot)].set(initial_angle)
+                
+                # Send to hardware via servo_state
+                self.servo_state.update_angle(channel, initial_angle)
 
     def _on_estop(self):
         """Emergency stop - release all servos."""
