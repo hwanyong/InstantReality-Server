@@ -7,8 +7,7 @@
       "type": "horizontal",
       "min_pos": "right",
       "initial": 57,
-      "length": 107.0,
-      "zero_offset": 135.0
+      "length": 107.0
     },
     "slot_2": {
       "channel": 1,
@@ -16,8 +15,7 @@
       "max": 145,
       "min_pos": "bottom",
       "initial": 145,
-      "length": 105.0,
-      "zero_offset": 100.0
+      "length": 105.0
     },
     "slot_3": {
       "channel": 2,
@@ -25,8 +23,7 @@
       "max": 142,
       "min_pos": "bottom",
       "initial": 142,
-      "length": 150.0,
-      "zero_offset": 51.0
+      "length": 150.0
     },
     "slot_4": {
       "channel": 3,
@@ -35,8 +32,7 @@
       "type": "horizontal",
       "min_pos": "left",
       "initial": 88,
-      "length": 65.0,
-      "zero_offset": 88.0
+      "length": 65.0
     },
     "slot_5": {
       "channel": 4,
@@ -45,8 +41,7 @@
       "type": "roll",
       "min_pos": "ccw",
       "initial": 57,
-      "length": 30.0,
-      "zero_offset": 57.0
+      "length": 30.0
     },
     "slot_6": {
       "channel": 5,
@@ -55,8 +50,7 @@
       "type": "gripper",
       "min_pos": "close",
       "initial": 3,
-      "length": 70.0,
-      "zero_offset": 3.0
+      "length": 70.0
     }
   },
   "right_arm": {
@@ -67,8 +61,7 @@
       "type": "horizontal",
       "min_pos": "right",
       "initial": 131,
-      "length": 107.0,
-      "zero_offset": 60.0
+      "length": 107.0
     },
     "slot_2": {
       "channel": 7,
@@ -76,8 +69,7 @@
       "max": 144,
       "min_pos": "bottom",
       "initial": 144,
-      "length": 105.0,
-      "zero_offset": 108.0
+      "length": 105.0
     },
     "slot_3": {
       "channel": 8,
@@ -85,8 +77,7 @@
       "max": 144,
       "min_pos": "top",
       "initial": 144,
-      "length": 150.0,
-      "zero_offset": 55.0
+      "length": 150.0
     },
     "slot_4": {
       "channel": 9,
@@ -95,8 +86,7 @@
       "type": "horizontal",
       "min_pos": "left",
       "initial": 62,
-      "length": 65.0,
-      "zero_offset": 62.0
+      "length": 65.0
     },
     "slot_5": {
       "channel": 10,
@@ -105,8 +95,7 @@
       "type": "roll",
       "min_pos": "ccw",
       "initial": 63,
-      "length": 30.0,
-      "zero_offset": 63.0
+      "length": 30.0
     },
     "slot_6": {
       "channel": 11,
@@ -115,8 +104,7 @@
       "type": "gripper",
       "min_pos": "open",
       "initial": 92,
-      "length": 70.0,
-      "zero_offset": 92.0
+      "length": 70.0
     }
   },
   "connection": {
