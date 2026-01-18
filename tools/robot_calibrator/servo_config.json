@@ -13,7 +13,7 @@
       "channel": 1,
       "min": 0,
       "max": 145,
-      "min_pos": "top",
+      "min_pos": "bottom",
       "initial": 145,
       "length": 105.0
     },
@@ -21,7 +21,7 @@
       "channel": 2,
       "min": 0,
       "max": 142,
-      "min_pos": "top",
+      "min_pos": "bottom",
       "initial": 142,
       "length": 150.0
     },
@@ -67,7 +67,7 @@
       "channel": 7,
       "min": 42,
       "max": 144,
-      "min_pos": "top",
+      "min_pos": "bottom",
       "initial": 144,
       "length": 105.0
     },
