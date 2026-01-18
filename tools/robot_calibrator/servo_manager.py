@@ -14,20 +14,20 @@ class ServoManager:
 
     DEFAULT_CONFIG = {
         "left_arm": {
-            "slot_1": {"channel": 0, "min": 0, "max": 180, "type": "vertical", "min_pos": "bottom", "length": 0, "initial": 90},
-            "slot_2": {"channel": 1, "min": 0, "max": 180, "type": "vertical", "min_pos": "bottom", "length": 0, "initial": 90},
-            "slot_3": {"channel": 2, "min": 0, "max": 180, "type": "vertical", "min_pos": "bottom", "length": 0, "initial": 90},
-            "slot_4": {"channel": 3, "min": 0, "max": 180, "type": "vertical", "min_pos": "bottom", "length": 0, "initial": 90},
-            "slot_5": {"channel": 4, "min": 0, "max": 180, "type": "vertical", "min_pos": "bottom", "length": 0, "initial": 90},
-            "slot_6": {"channel": 5, "min": 0, "max": 180, "type": "vertical", "min_pos": "bottom", "length": 0, "initial": 90}
+            "slot_1": {"channel": 0, "min": 0, "max": 180, "type": "vertical", "min_pos": "bottom", "length": 0, "initial": 90, "zero_offset": 0},
+            "slot_2": {"channel": 1, "min": 0, "max": 180, "type": "vertical", "min_pos": "bottom", "length": 0, "initial": 90, "zero_offset": 0},
+            "slot_3": {"channel": 2, "min": 0, "max": 180, "type": "vertical", "min_pos": "bottom", "length": 0, "initial": 90, "zero_offset": 0},
+            "slot_4": {"channel": 3, "min": 0, "max": 180, "type": "vertical", "min_pos": "bottom", "length": 0, "initial": 90, "zero_offset": 0},
+            "slot_5": {"channel": 4, "min": 0, "max": 180, "type": "vertical", "min_pos": "bottom", "length": 0, "initial": 90, "zero_offset": 0},
+            "slot_6": {"channel": 5, "min": 0, "max": 180, "type": "vertical", "min_pos": "bottom", "length": 0, "initial": 90, "zero_offset": 0}
         },
         "right_arm": {
-            "slot_1": {"channel": 6, "min": 0, "max": 180, "type": "vertical", "min_pos": "bottom", "length": 0, "initial": 90},
-            "slot_2": {"channel": 7, "min": 0, "max": 180, "type": "vertical", "min_pos": "bottom", "length": 0, "initial": 90},
-            "slot_3": {"channel": 8, "min": 0, "max": 180, "type": "vertical", "min_pos": "bottom", "length": 0, "initial": 90},
-            "slot_4": {"channel": 9, "min": 0, "max": 180, "type": "vertical", "min_pos": "bottom", "length": 0, "initial": 90},
-            "slot_5": {"channel": 10, "min": 0, "max": 180, "type": "vertical", "min_pos": "bottom", "length": 0, "initial": 90},
-            "slot_6": {"channel": 11, "min": 0, "max": 180, "type": "vertical", "min_pos": "bottom", "length": 0, "initial": 90}
+            "slot_1": {"channel": 6, "min": 0, "max": 180, "type": "vertical", "min_pos": "bottom", "length": 0, "initial": 90, "zero_offset": 0},
+            "slot_2": {"channel": 7, "min": 0, "max": 180, "type": "vertical", "min_pos": "bottom", "length": 0, "initial": 90, "zero_offset": 0},
+            "slot_3": {"channel": 8, "min": 0, "max": 180, "type": "vertical", "min_pos": "bottom", "length": 0, "initial": 90, "zero_offset": 0},
+            "slot_4": {"channel": 9, "min": 0, "max": 180, "type": "vertical", "min_pos": "bottom", "length": 0, "initial": 90, "zero_offset": 0},
+            "slot_5": {"channel": 10, "min": 0, "max": 180, "type": "vertical", "min_pos": "bottom", "length": 0, "initial": 90, "zero_offset": 0},
+            "slot_6": {"channel": 11, "min": 0, "max": 180, "type": "vertical", "min_pos": "bottom", "length": 0, "initial": 90, "zero_offset": 0}
         },
         "connection": {
             "port": ""
@@ -231,7 +231,7 @@ class ServoManager:
         if arm not in self.config:
             self.config[arm] = {}
         if slot_key not in self.config[arm]:
-            self.config[arm][slot_key] = {"channel": 0, "min": 0, "max": 180, "type": "vertical", "min_pos": "bottom", "length": 0, "initial": 90}
+            self.config[arm][slot_key] = {"channel": 0, "min": 0, "max": 180, "type": "vertical", "min_pos": "bottom", "length": 0, "initial": 90, "zero_offset": 0}
 
     def get_initial(self, arm, slot):
         """
@@ -259,6 +259,35 @@ class ServoManager:
         slot_key = f"slot_{slot}"
         self._ensure_slot_exists(arm, slot_key)
         self.config[arm][slot_key]["initial"] = value
+
+    def get_zero_offset(self, arm, slot):
+        """
+        Get zero point offset for a given slot.
+        This is the physical angle corresponding to Logical 0 (vertical pose).
+
+        Args:
+            arm: 'left_arm' or 'right_arm'
+            slot: Slot number (1-6)
+
+        Returns:
+            float: Offset angle in degrees
+        """
+        slot_key = f"slot_{slot}"
+        return self.config.get(arm, {}).get(slot_key, {}).get("zero_offset", 0)
+
+    def set_zero_offset(self, arm, slot, value):
+        """
+        Set zero point offset for a given slot.
+        This should be called when the robot is in the vertical calibration pose.
+
+        Args:
+            arm: 'left_arm' or 'right_arm'
+            slot: Slot number (1-6)
+            value: Offset angle (physical angle at Logical 0)
+        """
+        slot_key = f"slot_{slot}"
+        self._ensure_slot_exists(arm, slot_key)
+        self.config[arm][slot_key]["zero_offset"] = value
 
     def get_all_slots(self):
         """

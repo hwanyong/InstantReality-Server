@@ -14,6 +14,7 @@ import os
 
 from serial_driver import SerialDriver as PCA9685Driver
 from servo_manager import ServoManager
+from motion_planner import MotionPlanner
 
 
 class ServoState:
@@ -55,6 +56,11 @@ class ServoState:
         with self._lock:
             self.last_sent_angles.clear()
 
+    def get_angle(self, channel):
+        """Get current target angle for a channel."""
+        with self._lock:
+            return self.target_angles.get(channel, None)
+
 
 class CalibratorGUI:
     """
@@ -71,6 +77,7 @@ class CalibratorGUI:
         self.driver = PCA9685Driver()
         self.manager = ServoManager()
         self.servo_state = ServoState()
+        self.motion_planner = MotionPlanner(self.servo_state)
 
         # State variables
         self.is_connected = False
@@ -232,15 +239,25 @@ class CalibratorGUI:
             ch_combo.bind("<<ComboboxSelected>>", lambda e, a=arm_key, s=slot: self._on_channel_change(a, s))
 
             # Angle slider
-            angle_var = tk.IntVar(value=90)
+            angle_var = tk.DoubleVar(value=90.0)
             self.angle_vars[(arm_key, slot)] = angle_var
+
+            # [-] Button
+            ttk.Button(row1, text="-", width=2, 
+                command=lambda a=arm_key, s=slot: self._adjust_angle(a, s, -0.1)
+            ).pack(side=tk.LEFT, padx=2)
 
             slider = ttk.Scale(
                 row1, from_=0, to=180, variable=angle_var, orient=tk.HORIZONTAL, length=200,
-                command=lambda v, a=arm_key, s=slot: self._on_slider_change(a, s, v)
+                command=lambda v, a=arm_key, s=slot: self._on_slider_change(a, s, float(v))
             )
-            slider.pack(side=tk.LEFT, padx=10)
+            slider.pack(side=tk.LEFT, padx=5)
             self.sliders[(arm_key, slot)] = slider
+
+            # [+] Button
+            ttk.Button(row1, text="+", width=2, 
+                command=lambda a=arm_key, s=slot: self._adjust_angle(a, s, 0.1)
+            ).pack(side=tk.LEFT, padx=2)
 
             # Angle display
             ttk.Label(row1, textvariable=angle_var, width=4).pack(side=tk.LEFT)
@@ -339,6 +356,19 @@ class CalibratorGUI:
         ttk.Button(frame, text="Set Home", command=self._on_set_home).pack(side=tk.LEFT, padx=5)
         ttk.Button(frame, text="Go Home", command=self._on_go_home).pack(side=tk.LEFT, padx=5)
         
+        # Zero Point Calibration controls
+        ttk.Separator(frame, orient=tk.VERTICAL).pack(side=tk.LEFT, padx=10, fill=tk.Y)
+        ttk.Button(frame, text="Set Zero", command=self._on_set_zero).pack(side=tk.LEFT, padx=5)
+        ttk.Button(frame, text="Go to Zero", command=self._on_go_to_zero).pack(side=tk.LEFT, padx=5)
+        
+        # Motion Duration spinbox
+        ttk.Separator(frame, orient=tk.VERTICAL).pack(side=tk.LEFT, padx=10, fill=tk.Y)
+        ttk.Label(frame, text="Speed:").pack(side=tk.LEFT)
+        self.duration_var = tk.DoubleVar(value=1.0)
+        duration_spinbox = ttk.Spinbox(frame, from_=0.5, to=3.0, increment=0.1, textvariable=self.duration_var, width=5, format="%.1f")
+        duration_spinbox.pack(side=tk.LEFT, padx=2)
+        ttk.Label(frame, text="s").pack(side=tk.LEFT)
+        
         # Slider constraint toggle
         ttk.Separator(frame, orient=tk.VERTICAL).pack(side=tk.LEFT, padx=10, fill=tk.Y)
         self.constrain_var = tk.BooleanVar(value=False)
@@ -379,6 +409,26 @@ class CalibratorGUI:
             else:
                 self.status_var.set("Connection Failed")
                 messagebox.showerror("Error", f"Failed to connect to {port}")
+
+    def _adjust_angle(self, arm, slot, delta):
+        """Increment or decrement angle by delta."""
+        var = self.angle_vars[(arm, slot)]
+        current = var.get()
+        new_val = round(current + delta, 1)
+        
+        # Clamp to 0-180 (or limits if constrained)
+        min_limit = 0
+        max_limit = 180
+        if self.constrain_var.get():
+            limits = self.manager.get_limits(arm, slot)
+            min_limit = limits["min"]
+            max_limit = limits["max"]
+            
+        new_val = max(min_limit, min(max_limit, new_val))
+        
+        # Update variable and trigger change handler
+        var.set(new_val)
+        self._on_slider_change(arm, slot, new_val)
 
     def _on_channel_change(self, arm, slot):
         """Handle channel dropdown change."""
@@ -602,7 +652,7 @@ class CalibratorGUI:
             messagebox.showerror("Error", "Failed to save home position")
 
     def _on_go_home(self):
-        """Move all joints to their saved home (initial) positions."""
+        """Move all joints to their saved home (initial) positions with smooth motion."""
         if not self.is_connected:
             messagebox.showwarning("Warning", "Not connected to hardware")
             return
@@ -610,16 +660,63 @@ class CalibratorGUI:
         # Force updates even if software thinks it's at the same position
         self.servo_state.clear_history()
         
+        # Build target list and update UI
+        targets = []
         for arm in ["left_arm", "right_arm"]:
             for slot in range(1, 7):
                 initial_angle = self.manager.get_initial(arm, slot)
                 channel = self.manager.get_channel(arm, slot)
-                
-                # Update UI slider
+                targets.append((channel, initial_angle))
+                # Update UI slider immediately
                 self.angle_vars[(arm, slot)].set(initial_angle)
-                
-                # Send to hardware via servo_state
-                self.servo_state.update_angle(channel, initial_angle)
+        
+        # Execute smooth motion
+        duration = self.duration_var.get()
+        self.motion_planner.move_all(targets, duration)
+
+    def _on_set_zero(self):
+        """Save current slider positions as zero point (vertical pose) for all joints."""
+        if not messagebox.askyesno("Set Zero Point", 
+            "This will save the current pose as Logical 0 (Vertical Position).\n"
+            "Make sure the robot is Vertical and Facing Forward (Parallel to Top Edge)!\n\n"
+            "현재 자세를 논리적 0점(수직 자세)으로 저장합니다.\n"
+            "로봇이 수직으로 서 있고, 상단 모서리와 평행한 정면을 보는지 확인하세요!\n\n"
+            "Continue?"):
+            return
+        
+        for arm in ["left_arm", "right_arm"]:
+            for slot in range(1, 7):
+                current_angle = self.angle_vars[(arm, slot)].get()
+                self.manager.set_zero_offset(arm, slot, current_angle)
+        
+        # Auto-save config
+        if self.manager.save_config():
+            messagebox.showinfo("Set Zero", "Zero point saved successfully!\n0점이 성공적으로 저장되었습니다!")
+        else:
+            messagebox.showerror("Error", "Failed to save zero point")
+
+    def _on_go_to_zero(self):
+        """Move all joints to their saved zero point (vertical pose) with smooth motion."""
+        if not self.is_connected:
+            messagebox.showwarning("Warning", "Not connected to hardware")
+            return
+        
+        # Force updates even if software thinks it's at the same position
+        self.servo_state.clear_history()
+        
+        # Build target list and update UI
+        targets = []
+        for arm in ["left_arm", "right_arm"]:
+            for slot in range(1, 7):
+                zero_angle = self.manager.get_zero_offset(arm, slot)
+                channel = self.manager.get_channel(arm, slot)
+                targets.append((channel, zero_angle))
+                # Update UI slider immediately
+                self.angle_vars[(arm, slot)].set(zero_angle)
+        
+        # Execute smooth motion
+        duration = self.duration_var.get()
+        self.motion_planner.move_all(targets, duration)
 
     def _on_estop(self):
         """Emergency stop - release all servos."""
