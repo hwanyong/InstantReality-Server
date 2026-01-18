@@ -3,7 +3,7 @@
     "slot_1": {
       "channel": 0,
       "min": 0,
-      "max": 150,
+      "max": 145.71428571428572,
       "type": "horizontal",
       "min_pos": "right",
       "initial": 57,
@@ -63,7 +63,7 @@
     "slot_1": {
       "channel": 6,
       "min": 0,
-      "max": 180,
+      "max": 146.78571428571428,
       "type": "horizontal",
       "min_pos": "right",
       "initial": 131,
