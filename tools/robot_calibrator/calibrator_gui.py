@@ -9,6 +9,8 @@ import serial.tools.list_ports
 import threading
 import math
 import time
+import shutil
+import os
 
 from serial_driver import SerialDriver as PCA9685Driver
 from servo_manager import ServoManager
@@ -110,6 +112,48 @@ class CalibratorGUI:
         # Bind close event
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
+    def _deploy_config(self):
+        """Deploy current servo_config.json to project root."""
+        if not messagebox.askyesno("Deploy Config", 
+            "This will overwrite the main server's servo configuration.\n"
+            "Proceed?\n\n"
+            "이 작업은 메인 서버의 서보 설정을 덮어씁니다.\n"
+            "진행하시겠습니까?"):
+            return
+
+        try:
+            # Save current state first
+            self.manager.save_config()
+            
+            # Define paths
+            # Assuming script is in tools/robot_calibrator
+            # Project root is ../../
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            src_file = os.path.join(current_dir, "servo_config.json")
+            
+            # Destination: Project Root
+            root_dir = os.path.abspath(os.path.join(current_dir, "../../"))
+            dest_file = os.path.join(root_dir, "servo_config.json")
+            
+            if not os.path.exists(src_file):
+                messagebox.showerror("Error", "Source config not found!")
+                return
+                
+            # Backup if exists
+            if os.path.exists(dest_file):
+                shutil.copy2(dest_file, dest_file + ".bak")
+                
+            # Copy
+            shutil.copy2(src_file, dest_file)
+            
+            messagebox.showinfo("Success", 
+                f"Configuration deployed successfully!\n\n"
+                f"From: {src_file}\n"
+                f"To:   {dest_file}")
+                
+        except Exception as e:
+            messagebox.showerror("Error", f"Deployment failed: {e}")
+
     def _create_styles(self):
         """Create custom styles for widgets."""
         style = ttk.Style()
@@ -138,6 +182,9 @@ class CalibratorGUI:
         # Connect button
         self.connect_btn = ttk.Button(frame, text="Connect", command=self._on_connect)
         self.connect_btn.pack(side=tk.RIGHT, padx=5)
+
+        # Deploy button
+        ttk.Button(frame, text="Deploy Config", command=self._deploy_config).pack(side=tk.RIGHT, padx=5)
 
         # Port dropdown
         self.port_combo = ttk.Combobox(frame, textvariable=self.port_var, width=15)
