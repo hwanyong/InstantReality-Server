@@ -1,5 +1,5 @@
 {
-  "left_arm": {
+  "right_arm": {
     "slot_1": {
       "channel": 0,
       "min": 0,
@@ -59,7 +59,7 @@
       "zero_offset": 3.0
     }
   },
-  "right_arm": {
+  "left_arm": {
     "slot_1": {
       "channel": 6,
       "min": 0,
