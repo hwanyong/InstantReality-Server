@@ -289,6 +289,33 @@ class ServoManager:
         self._ensure_slot_exists(arm, slot_key)
         self.config[arm][slot_key]["zero_offset"] = value
 
+    def get_actuation_range(self, arm, slot):
+        """
+        Get motor's physical actuation range for a given slot.
+
+        Args:
+            arm: 'left_arm' or 'right_arm'
+            slot: Slot number (1-6)
+
+        Returns:
+            int: 180 or 270 (degrees)
+        """
+        slot_key = f"slot_{slot}"
+        return self.config.get(arm, {}).get(slot_key, {}).get("actuation_range", 180)
+
+    def set_actuation_range(self, arm, slot, value):
+        """
+        Set motor's physical actuation range for a given slot.
+
+        Args:
+            arm: 'left_arm' or 'right_arm'
+            slot: Slot number (1-6)
+            value: 180 or 270 (degrees)
+        """
+        slot_key = f"slot_{slot}"
+        self._ensure_slot_exists(arm, slot_key)
+        self.config[arm][slot_key]["actuation_range"] = value
+
     def get_all_slots(self):
         """
         Get all slot configurations.

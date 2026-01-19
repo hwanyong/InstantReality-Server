@@ -15,6 +15,28 @@ import os
 from serial_driver import SerialDriver as PCA9685Driver
 from servo_manager import ServoManager
 from motion_planner import MotionPlanner
+from pulse_mapper import PulseMapper
+
+
+# ============ Constants ============
+# Hardware
+NUM_SLOTS = 6                    # Servo slots per arm
+NUM_CHANNELS = 16                # PCA9685 channel count
+ARM_NAMES = ["left_arm", "right_arm"]
+
+# UI Theme
+THEME = {
+    "bg": "#2b2b2b",
+    "fg": "#ffffff",
+    "success": "#44ff44",
+    "error": "#ff4444",
+    "warning": "#ffaa00"
+}
+
+# Thread Timing (seconds)
+SENDER_LOOP_INTERVAL = 0.033     # ~30Hz
+SENDER_CMD_DELAY = 0.002         # Delay between commands
+SINE_TEST_INTERVAL = 0.05        # Sine wave update interval
 
 
 class ServoState:
@@ -71,13 +93,14 @@ class CalibratorGUI:
         self.root = tk.Tk()
         self.root.title("Robot Calibration Tool")
         self.root.geometry("800x700")
-        self.root.configure(bg="#2b2b2b")
+        self.root.configure(bg=THEME["bg"])
 
         # Initialize components
         self.driver = PCA9685Driver()
         self.manager = ServoManager()
         self.servo_state = ServoState()
         self.motion_planner = MotionPlanner(self.servo_state)
+        self.pulse_mapper = PulseMapper()  # For heterogeneous motor support
 
         # State variables
         self.is_connected = False
@@ -102,6 +125,7 @@ class CalibratorGUI:
         self.min_pos_vars = {}
         self.min_pos_combos = {}  # Store ComboBox references for dynamic update
         self.length_vars = {}
+        self.actuation_range_vars = {}  # Motor actuation range (180/270)
         self.constrain_var = None  # Slider constraint toggle
 
         # Build UI
@@ -167,8 +191,8 @@ class CalibratorGUI:
         style.theme_use('clam')
 
         # Configure colors
-        style.configure("TFrame", background="#2b2b2b")
-        style.configure("TLabel", background="#2b2b2b", foreground="#ffffff")
+        style.configure("TFrame", background=THEME["bg"])
+        style.configure("TLabel", background=THEME["bg"], foreground=THEME["fg"])
         style.configure("TButton", padding=5)
         style.configure("Header.TLabel", font=("Arial", 12, "bold"))
         style.configure("Status.TLabel", font=("Arial", 10))
@@ -179,9 +203,9 @@ class CalibratorGUI:
         frame.pack(fill=tk.X)
 
         # Status indicator
-        self.status_canvas = tk.Canvas(frame, width=20, height=20, bg="#2b2b2b", highlightthickness=0)
+        self.status_canvas = tk.Canvas(frame, width=20, height=20, bg=THEME["bg"], highlightthickness=0)
         self.status_canvas.pack(side=tk.LEFT, padx=(0, 10))
-        self.status_indicator = self.status_canvas.create_oval(2, 2, 18, 18, fill="#ff4444")
+        self.status_indicator = self.status_canvas.create_oval(2, 2, 18, 18, fill=THEME["error"])
 
         # Status label
         ttk.Label(frame, textvariable=self.status_var, style="Status.TLabel").pack(side=tk.LEFT)
@@ -209,12 +233,12 @@ class CalibratorGUI:
         # Left Arm Tab
         left_frame = ttk.Frame(notebook, padding=10)
         notebook.add(left_frame, text="Left Arm")
-        self._create_arm_controls(left_frame, "left_arm", range(1, 7))
+        self._create_arm_controls(left_frame, "left_arm", range(1, NUM_SLOTS + 1))
 
         # Right Arm Tab
         right_frame = ttk.Frame(notebook, padding=10)
         notebook.add(right_frame, text="Right Arm")
-        self._create_arm_controls(right_frame, "right_arm", range(1, 7))
+        self._create_arm_controls(right_frame, "right_arm", range(1, NUM_SLOTS + 1))
 
     def _create_arm_controls(self, parent, arm_key, slots):
         """Create control widgets for one arm with kinematics settings."""
@@ -234,7 +258,7 @@ class CalibratorGUI:
             ch_var = tk.IntVar(value=self.manager.get_channel(arm_key, slot))
             self.channel_vars[(arm_key, slot)] = ch_var
 
-            ch_combo = ttk.Combobox(row1, textvariable=ch_var, values=list(range(16)), width=5)
+            ch_combo = ttk.Combobox(row1, textvariable=ch_var, values=list(range(NUM_CHANNELS)), width=5)
             ch_combo.pack(side=tk.LEFT, padx=5)
             ch_combo.bind("<<ComboboxSelected>>", lambda e, a=arm_key, s=slot: self._on_channel_change(a, s))
 
@@ -247,8 +271,10 @@ class CalibratorGUI:
                 command=lambda a=arm_key, s=slot: self._adjust_angle(a, s, -0.1)
             ).pack(side=tk.LEFT, padx=2)
 
+            # Angle slider - range based on motor actuation_range
+            current_range = self.manager.get_actuation_range(arm_key, slot)
             slider = ttk.Scale(
-                row1, from_=0, to=180, variable=angle_var, orient=tk.HORIZONTAL, length=200,
+                row1, from_=0, to=current_range, variable=angle_var, orient=tk.HORIZONTAL, length=200,
                 command=lambda v, a=arm_key, s=slot: self._on_slider_change(a, s, float(v))
             )
             slider.pack(side=tk.LEFT, padx=5)
@@ -318,6 +344,15 @@ class CalibratorGUI:
             length_entry.bind("<Return>", lambda e, a=arm_key, s=slot: self._on_length_change(a, s))
             ttk.Label(row2, text="mm").pack(side=tk.LEFT)
 
+            # Actuation Range dropdown (180°/270°)
+            ttk.Label(row2, text="Range:").pack(side=tk.LEFT, padx=(10, 2))
+            range_var = tk.IntVar(value=self.manager.get_actuation_range(arm_key, slot))
+            self.actuation_range_vars[(arm_key, slot)] = range_var
+            range_combo = ttk.Combobox(row2, textvariable=range_var, values=[180, 270], width=5, state="readonly")
+            range_combo.pack(side=tk.LEFT, padx=2)
+            range_combo.bind("<<ComboboxSelected>>", lambda e, a=arm_key, s=slot: self._on_range_change(a, s))
+            ttk.Label(row2, text="°").pack(side=tk.LEFT)
+
     def _create_diagnostics_panel(self):
         """Create diagnostics panel."""
         frame = ttk.LabelFrame(self.root, text="Diagnostics", padding=10)
@@ -326,7 +361,7 @@ class CalibratorGUI:
         # Sine test controls
         ttk.Label(frame, text="Sine Test Channel:").pack(side=tk.LEFT)
         self.sine_channel_var = tk.IntVar(value=0)
-        ttk.Combobox(frame, textvariable=self.sine_channel_var, values=list(range(16)), width=5).pack(side=tk.LEFT, padx=5)
+        ttk.Combobox(frame, textvariable=self.sine_channel_var, values=list(range(NUM_CHANNELS)), width=5).pack(side=tk.LEFT, padx=5)
 
         self.sine_btn = ttk.Button(frame, text="Start Sine Test", command=self._on_sine_test)
         self.sine_btn.pack(side=tk.LEFT, padx=10)
@@ -341,7 +376,7 @@ class CalibratorGUI:
 
         # E-STOP button (prominent)
         estop_btn = tk.Button(
-            frame, text="E-STOP", bg="#ff4444", fg="white",
+            frame, text="E-STOP", bg=THEME["error"], fg="white",
             font=("Arial", 12, "bold"), width=10,
             command=self._on_estop
         )
@@ -388,7 +423,7 @@ class CalibratorGUI:
             self.driver.disconnect()
             self.is_connected = False
             self.status_var.set("Disconnected")
-            self.status_canvas.itemconfig(self.status_indicator, fill="#ff4444")
+            self.status_canvas.itemconfig(self.status_indicator, fill=THEME["error"])
             self.connect_btn.config(text="Connect")
         else:
             # Connect
@@ -403,7 +438,7 @@ class CalibratorGUI:
             if self.driver.connect(port):
                 self.is_connected = True
                 self.status_var.set(f"Connected: {port}")
-                self.status_canvas.itemconfig(self.status_indicator, fill="#44ff44")
+                self.status_canvas.itemconfig(self.status_indicator, fill=THEME["success"])
                 self.connect_btn.config(text="Disconnect")
                 self.manager.set_saved_port(port)
             else:
@@ -416,9 +451,9 @@ class CalibratorGUI:
         current = var.get()
         new_val = round(current + delta, 1)
         
-        # Clamp to 0-180 (or limits if constrained)
+        # Clamp to 0-actuation_range (or limits if constrained)
         min_limit = 0
-        max_limit = 180
+        max_limit = self.manager.get_actuation_range(arm, slot)
         if self.constrain_var.get():
             limits = self.manager.get_limits(arm, slot)
             min_limit = limits["min"]
@@ -439,15 +474,23 @@ class CalibratorGUI:
         """
         Handle slider movement.
         OPTIMIZED: Updates state only. Sender thread handles transmission.
+        Now includes PulseMapper for heterogeneous motor support.
         """
         if not self.is_connected:
             return
 
-        angle = int(float(value))
+        physical_angle = float(value)
         channel = self.manager.get_channel(arm, slot)
         
-        # Update thread-safe state map instead of sending directly
-        self.servo_state.update_angle(channel, angle)
+        # Get motor config for this slot
+        slot_key = f"slot_{slot}"
+        motor_config = self.manager.config.get(arm, {}).get(slot_key, {})
+        
+        # Convert physical angle to virtual (Arduino) angle
+        virtual_angle = self.pulse_mapper.physical_to_virtual(physical_angle, motor_config)
+        
+        # Update thread-safe state map with virtual angle
+        self.servo_state.update_angle(channel, int(virtual_angle))
 
     def _sender_thread_loop(self):
         """
@@ -468,11 +511,10 @@ class CalibratorGUI:
                         # It will be retried in the next loop because angle != last_sent
                         pass
                         
-                    # Short sleep is still good to avoid saturating input
-                    time.sleep(0.002)
+                    time.sleep(SENDER_CMD_DELAY)
             
             # 30Hz Loop
-            time.sleep(0.033)
+            time.sleep(SENDER_LOOP_INTERVAL)
 
     def _on_set_min(self, arm, slot):
         """Set current angle as minimum limit."""
@@ -512,8 +554,8 @@ class CalibratorGUI:
         """Toggle slider constraints between full range and Min/Max limits."""
         constrained = self.constrain_var.get()
         
-        for arm in ["left_arm", "right_arm"]:
-            for slot in range(1, 7):
+        for arm in ARM_NAMES:
+            for slot in range(1, NUM_SLOTS + 1):
                 slider = self.sliders[(arm, slot)]
                 limits = self.manager.get_limits(arm, slot)
                 min_limit = limits["min"]
@@ -534,8 +576,9 @@ class CalibratorGUI:
                         channel = self.manager.get_channel(arm, slot)
                         self.servo_state.update_angle(channel, max_limit)
                 else:
-                    # Reset to full range
-                    slider.configure(from_=0, to=180)
+                    # Reset to full range based on actuation_range
+                    full_range = self.manager.get_actuation_range(arm, slot)
+                    slider.configure(from_=0, to=full_range)
 
     def _on_type_change(self, arm, slot):
         """Handle type dropdown change. Updates min_pos options dynamically."""
@@ -569,6 +612,20 @@ class CalibratorGUI:
             # Invalid input, reset to saved value
             self.length_vars[(arm, slot)].set(str(self.manager.get_length(arm, slot)))
 
+    def _on_range_change(self, arm, slot):
+        """Handle actuation range dropdown change."""
+        new_range = self.actuation_range_vars[(arm, slot)].get()
+        self.manager.set_actuation_range(arm, slot, new_range)
+        
+        # Update slider range dynamically
+        slider = self.sliders[(arm, slot)]
+        slider.configure(to=new_range)
+        
+        # Clamp current value if exceeds new range
+        current = self.angle_vars[(arm, slot)].get()
+        if current > new_range:
+            self.angle_vars[(arm, slot)].set(new_range)
+
     def _on_sine_test(self):
         """Start/stop sine wave test."""
         if self.sine_test_running:
@@ -597,7 +654,7 @@ class CalibratorGUI:
             self.servo_state.update_angle(channel, int(angle))
             
             t += 0.1
-            time.sleep(0.05)
+            time.sleep(SINE_TEST_INTERVAL)
 
     def _on_i2c_scan(self):
         """Scan for I2C devices (placeholder)."""
@@ -618,8 +675,8 @@ class CalibratorGUI:
         self.manager.load_config()
 
         # Update UI with loaded values
-        for arm in ["left_arm", "right_arm"]:
-            for slot in range(1, 7):
+        for arm in ARM_NAMES:
+            for slot in range(1, NUM_SLOTS + 1):
                 self.channel_vars[(arm, slot)].set(self.manager.get_channel(arm, slot))
                 limits = self.manager.get_limits(arm, slot)
                 self.min_labels[(arm, slot)].set(str(limits["min"]))
@@ -640,8 +697,8 @@ class CalibratorGUI:
 
     def _on_set_home(self):
         """Save current slider positions as home (initial) position for all joints."""
-        for arm in ["left_arm", "right_arm"]:
-            for slot in range(1, 7):
+        for arm in ARM_NAMES:
+            for slot in range(1, NUM_SLOTS + 1):
                 current_angle = self.angle_vars[(arm, slot)].get()
                 self.manager.set_initial(arm, slot, current_angle)
         
@@ -662,8 +719,8 @@ class CalibratorGUI:
         
         # Build target list and update UI
         targets = []
-        for arm in ["left_arm", "right_arm"]:
-            for slot in range(1, 7):
+        for arm in ARM_NAMES:
+            for slot in range(1, NUM_SLOTS + 1):
                 initial_angle = self.manager.get_initial(arm, slot)
                 channel = self.manager.get_channel(arm, slot)
                 targets.append((channel, initial_angle))
@@ -684,8 +741,8 @@ class CalibratorGUI:
             "Continue?"):
             return
         
-        for arm in ["left_arm", "right_arm"]:
-            for slot in range(1, 7):
+        for arm in ARM_NAMES:
+            for slot in range(1, NUM_SLOTS + 1):
                 current_angle = self.angle_vars[(arm, slot)].get()
                 self.manager.set_zero_offset(arm, slot, current_angle)
         
@@ -706,8 +763,8 @@ class CalibratorGUI:
         
         # Build target list and update UI
         targets = []
-        for arm in ["left_arm", "right_arm"]:
-            for slot in range(1, 7):
+        for arm in ARM_NAMES:
+            for slot in range(1, NUM_SLOTS + 1):
                 zero_angle = self.manager.get_zero_offset(arm, slot)
                 channel = self.manager.get_channel(arm, slot)
                 targets.append((channel, zero_angle))
