@@ -37,15 +37,15 @@ class Slot0Verifier:
     - Async communication via sender thread
     """
     
-    # Workspace limits (mm)
-    X_MIN = 0
-    X_MAX = 400
+    # Workspace limits (mm) - symmetric for center-base layout
+    X_MIN = -300
+    X_MAX = 300
     Y_MIN = -300
     Y_MAX = 300
     
     # Canvas settings
     CANVAS_SIZE = 300
-    SCALE = 0.5  # pixels per mm
+    SCALE = 0.5  # pixels per mm (300px / 600mm range)
     
     def __init__(self):
         self.root = tk.Tk()
@@ -256,20 +256,21 @@ class Slot0Verifier:
     
     def _draw_static_elements(self):
         """Draw grid, axes, and valid zone arc."""
-        cx = 20  # Base X position (left side)
-        cy = self.CANVAS_SIZE // 2  # Base Y position (center)
+        # Base at canvas center for full 360° view
+        cx = self.CANVAS_SIZE // 2
+        cy = self.CANVAS_SIZE // 2
         
         # Grid lines
-        for i in range(0, self.CANVAS_SIZE, 50):
+        for i in range(0, self.CANVAS_SIZE + 1, 50):
             self.canvas.create_line(i, 0, i, self.CANVAS_SIZE, fill="#333333", dash=(2, 4))
             self.canvas.create_line(0, i, self.CANVAS_SIZE, i, fill="#333333", dash=(2, 4))
         
-        # Axes
+        # Axes through center
         self.canvas.create_line(cx, 0, cx, self.CANVAS_SIZE, fill="#555555", width=1)
         self.canvas.create_line(0, cy, self.CANVAS_SIZE, cy, fill="#555555", width=1)
         
         # Valid zone arc (fan shape from math_min to math_max)
-        radius = 250
+        radius = 140  # Fit within canvas (150 - margin)
         start_angle = self.math_min
         extent = self.math_max - self.math_min
         
@@ -279,7 +280,7 @@ class Slot0Verifier:
         
         # Base marker
         self.canvas.create_oval(cx - 6, cy - 6, cx + 6, cy + 6, fill="#ffffff", outline="#888888")
-        self.canvas.create_text(cx, cy + 15, text="Base", fill="#888888", font=("Arial", 8))
+        self.canvas.create_text(cx, cy + 18, text="Base", fill="#888888", font=("Arial", 8))
         
         # Store base coords
         self.base_cx = cx
