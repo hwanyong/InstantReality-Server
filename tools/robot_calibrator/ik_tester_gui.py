@@ -2,17 +2,27 @@
 Slot 0 (Base Yaw) Visual Verifier
 Minimal IK verification GUI with visual canvas and axis-aligned sliders.
 Supports Left and Right arm selection.
+
+Refactored to integrate with ServoManager, MotionPlanner, and async communication.
 """
 
 import tkinter as tk
 from tkinter import ttk, messagebox
 import serial.tools.list_ports
 import math
-import os
-import json
+import threading
+import time
 
 from serial_driver import SerialDriver
 from pulse_mapper import PulseMapper
+from servo_manager import ServoManager
+from servo_state import ServoState
+from motion_planner import MotionPlanner
+
+
+# Thread Timing (seconds)
+SENDER_LOOP_INTERVAL = 0.033     # ~30Hz
+SENDER_CMD_DELAY = 0.002         # Delay between commands
 
 
 class Slot0Verifier:
@@ -23,23 +33,9 @@ class Slot0Verifier:
     - Axis-aligned X/Y sliders
     - Valid angle zone display
     - Left/Right arm selection
+    - Smooth motion via MotionPlanner
+    - Async communication via sender thread
     """
-    
-    # Arm configurations
-    ARM_CONFIGS = {
-        "left": {
-            "channel": 6,
-            "zero_offset": 60.0,
-            "math_min": -60.0,
-            "math_max": 86.0
-        },
-        "right": {
-            "channel": 0,
-            "zero_offset": 135.0,
-            "math_min": -135.0,
-            "math_max": 10.0
-        }
-    }
     
     # Workspace limits (mm)
     X_MIN = 0
@@ -51,24 +47,35 @@ class Slot0Verifier:
     CANVAS_SIZE = 300
     SCALE = 0.5  # pixels per mm
     
-    MOTOR_CONFIG = {
-        "actuation_range": 180,
-        "pulse_min": 500,
-        "pulse_max": 2500
-    }
-    
     def __init__(self):
         self.root = tk.Tk()
         self.root.title("Slot 0 (Base Yaw) Visual Verifier")
-        self.root.geometry("500x680")
+        self.root.geometry("500x720")
         self.root.configure(bg="#2b2b2b")
         
-        # Components
+        # Core Components
         self.driver = SerialDriver()
         self.mapper = PulseMapper()
+        self.manager = ServoManager()
+        self.servo_state = ServoState()
+        self.motion_planner = MotionPlanner(self.servo_state)
         self.is_connected = False
         
-        # Active arm config (default: left)
+        # Sender thread
+        self.sender_running = True
+        self.sender_thread = threading.Thread(
+            target=self._sender_thread_loop, daemon=True
+        )
+        self.sender_thread.start()
+        
+        # Dynamic config (loaded per arm)
+        self.channel = None
+        self.zero_offset = None
+        self.motor_config = None
+        self.math_min = None
+        self.math_max = None
+        
+        # Active arm (default: left)
         self.arm_var = tk.StringVar(value="left")
         self._apply_arm_config()
         
@@ -79,6 +86,9 @@ class Slot0Verifier:
         # Coordinate sliders
         self.x_var = tk.DoubleVar(value=100.0)
         self.y_var = tk.DoubleVar(value=0.0)
+        
+        # Motion duration
+        self.duration_var = tk.DoubleVar(value=0.5)
         
         # Output
         self.theta_var = tk.StringVar(value="--")
@@ -105,13 +115,42 @@ class Slot0Verifier:
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
     
     def _apply_arm_config(self):
-        """Apply the selected arm's configuration."""
-        arm = self.arm_var.get()
-        config = self.ARM_CONFIGS[arm]
-        self.channel = config["channel"]
-        self.zero_offset = config["zero_offset"]
-        self.math_min = config["math_min"]
-        self.math_max = config["math_max"]
+        """Apply the selected arm's configuration from ServoManager."""
+        arm = "left_arm" if self.arm_var.get() == "left" else "right_arm"
+        
+        # Load from ServoManager
+        self.channel = self.manager.get_channel(arm, 1)
+        self.zero_offset = self.manager.get_zero_offset(arm, 1)
+        self.motor_config = self._get_slot_config(arm, 1)
+        
+        # Calculate math_min/max from physical limits
+        limits = self.manager.get_limits(arm, 1)
+        self.math_min = limits["min"] - self.zero_offset
+        self.math_max = limits["max"] - self.zero_offset
+    
+    def _get_slot_config(self, arm, slot):
+        """Get motor config dict for PulseMapper."""
+        slot_key = f"slot_{slot}"
+        config = self.manager.config.get(arm, {}).get(slot_key, {})
+        return {
+            "actuation_range": config.get("actuation_range", 180),
+            "pulse_min": config.get("pulse_min", 500),
+            "pulse_max": config.get("pulse_max", 2500)
+        }
+    
+    def _sender_thread_loop(self):
+        """
+        Background thread for sending servo commands.
+        Runs at ~30Hz. Retries failed commands automatically.
+        """
+        while self.sender_running:
+            if self.is_connected:
+                updates = self.servo_state.get_pending_updates()
+                for channel, pulse_us in updates:
+                    if self.driver.write_pulse(channel, pulse_us):
+                        self.servo_state.mark_as_sent(channel, pulse_us)
+                    time.sleep(SENDER_CMD_DELAY)
+            time.sleep(SENDER_LOOP_INTERVAL)
     
     def _create_styles(self):
         style = ttk.Style()
@@ -169,7 +208,7 @@ class Slot0Verifier:
         self.channel_label.config(text=f"(Ch: {self.channel})")
         self._redraw_canvas()
         self._update_visualization()
-        self._log(f"Switched to {self.arm_var.get().upper()} arm (Ch: {self.channel})")
+        self._log(f"Switched to {self.arm_var.get().upper()} arm (Ch: {self.channel}, Zero: {self.zero_offset}°)")
     
     def _create_canvas_panel(self):
         """Create the visual canvas with axis-aligned sliders."""
@@ -266,7 +305,7 @@ class Slot0Verifier:
         physical = theta1 + self.zero_offset
         self.physical_var.set(f"{physical:.1f}°")
         
-        pulse = self.mapper.physical_to_pulse(physical, self.MOTOR_CONFIG)
+        pulse = self.mapper.physical_to_pulse(physical, self.motor_config)
         self.pulse_var.set(f"{pulse} μs")
         
         if is_valid:
@@ -335,6 +374,13 @@ class Slot0Verifier:
         ttk.Button(frame, text="▶ Send", command=self._on_send).pack(side=tk.LEFT, padx=5)
         ttk.Button(frame, text="🏠 Zero", command=self._on_zero).pack(side=tk.LEFT, padx=5)
         
+        # Motion Duration
+        ttk.Separator(frame, orient=tk.VERTICAL).pack(side=tk.LEFT, padx=10, fill=tk.Y)
+        ttk.Label(frame, text="Duration:").pack(side=tk.LEFT)
+        ttk.Spinbox(frame, from_=0.1, to=2.0, increment=0.1,
+                    textvariable=self.duration_var, width=4, format="%.1f").pack(side=tk.LEFT, padx=2)
+        ttk.Label(frame, text="s").pack(side=tk.LEFT)
+        
         # E-STOP
         estop = tk.Button(frame, text="E-STOP", bg="#ff4444", fg="white",
                           font=("Arial", 11, "bold"), width=8, command=self._on_estop)
@@ -359,13 +405,9 @@ class Slot0Verifier:
             self.port_var.set(ports[0])
     
     def _load_saved_port(self):
-        config_path = os.path.join(os.path.dirname(__file__), "servo_config.json")
-        if os.path.exists(config_path):
-            with open(config_path, 'r') as f:
-                config = json.load(f)
-                port = config.get("connection", {}).get("port", "")
-                if port:
-                    self.port_var.set(port)
+        port = self.manager.get_saved_port()
+        if port:
+            self.port_var.set(port)
     
     def _on_connect(self):
         if self.is_connected:
@@ -405,18 +447,18 @@ class Slot0Verifier:
         
         # Check validity
         if theta1 < self.math_min or theta1 > self.math_max:
-            messagebox.showwarning("Warning", f"Angle {theta1:.1f}° is out of range [{self.math_min}, {self.math_max}]")
+            messagebox.showwarning("Warning", f"Angle {theta1:.1f}° is out of range [{self.math_min:.1f}, {self.math_max:.1f}]")
             return
         
         physical = theta1 + self.zero_offset
-        pulse = self.mapper.physical_to_pulse(physical, self.MOTOR_CONFIG)
+        pulse = self.mapper.physical_to_pulse(physical, self.motor_config)
         
-        success = self.driver.write_pulse(self.channel, pulse)
+        # Use MotionPlanner for smooth motion
+        targets = [(self.channel, pulse)]
+        duration = self.duration_var.get()
+        self.motion_planner.move_all(targets, duration)
         
-        if success:
-            self._log(f"Sent ch{self.channel}: {pulse}μs (θ1={theta1:.1f}°, Phy={physical:.1f}°)")
-        else:
-            self._log(f"✗ Send failed")
+        self._log(f"Moving ch{self.channel} to {pulse}μs over {duration:.1f}s (θ1={theta1:.1f}°, Phy={physical:.1f}°)")
     
     def _on_zero(self):
         """Set sliders to (100, 0) which gives Math 0."""
@@ -426,11 +468,14 @@ class Slot0Verifier:
         self._log("Set to Math 0 (X=100, Y=0)")
     
     def _on_estop(self):
+        self.motion_planner.stop()
         if self.is_connected:
             self.driver.release_all()
         self._log("!!! E-STOP !!!")
     
     def _on_close(self):
+        self.sender_running = False
+        self.motion_planner.stop()
         if self.is_connected:
             self.driver.release_all()
             self.driver.disconnect()
