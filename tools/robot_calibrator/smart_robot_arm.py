@@ -8,6 +8,8 @@ import math
 import json
 import os
 
+from pulse_mapper import PulseMapper
+
 
 class SmartRobotArm:
     """
@@ -49,6 +51,9 @@ class SmartRobotArm:
         # Direction multipliers for angle conversion
         # Determined by min_pos configuration
         self._setup_directions()
+        
+        # Pulse mapper for heterogeneous motor support (180° vs 270°)
+        self.pulse_mapper = PulseMapper()
     
     def _setup_directions(self):
         """Setup direction multipliers based on motor mounting."""
@@ -204,8 +209,14 @@ class SmartRobotArm:
         
         for slot in range(1, 5):
             channel = self._get_channel(slot)
-            angle = int(angles[slot - 1])
-            self.driver.set_servo_angle(channel, angle)
+            physical_angle = angles[slot - 1]
+            
+            # Convert physical angle to pulse width (Pass-Through mode)
+            slot_key = f"slot_{slot}"
+            motor_config = self.config.get(slot_key, {})
+            pulse_us = self.pulse_mapper.physical_to_pulse(physical_angle, motor_config)
+            
+            self.driver.write_pulse(channel, pulse_us)
     
     def get_servo_targets(self, angles):
         """
@@ -220,8 +231,14 @@ class SmartRobotArm:
         targets = []
         for slot in range(1, len(angles) + 1):
             channel = self._get_channel(slot)
-            angle = int(angles[slot - 1])
-            targets.append((channel, angle))
+            physical_angle = angles[slot - 1]
+            
+            # Convert physical angle to pulse width (Pass-Through mode)
+            slot_key = f"slot_{slot}"
+            motor_config = self.config.get(slot_key, {})
+            pulse_us = self.pulse_mapper.physical_to_pulse(physical_angle, motor_config)
+            
+            targets.append((channel, pulse_us))
         return targets
     
     def control_gripper(self, state):
@@ -247,7 +264,12 @@ class SmartRobotArm:
             return
         
         channel = self._get_channel(6)
-        self.driver.set_servo_angle(channel, int(target))
+        
+        # Convert physical angle to pulse width (Pass-Through mode)
+        slot_config = self.config.get("slot_6", {})
+        pulse_us = self.pulse_mapper.physical_to_pulse(target, slot_config)
+        
+        self.driver.write_pulse(channel, pulse_us)
     
     def get_current_position(self, angles):
         """

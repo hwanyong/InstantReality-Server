@@ -74,6 +74,40 @@ class PulseMapper:
         
         return virtual_angle
     
+    def physical_to_pulse(self, target_physical_deg, motor_config):
+        """
+        Convert physical target angle directly to pulse width in microseconds.
+        For Pass-Through mode where Arduino receives raw pulse values.
+        
+        Args:
+            target_physical_deg: Desired physical rotation (e.g., 90°)
+            motor_config: Dict with 'actuation_range', 'pulse_min', 'pulse_max'
+        
+        Returns:
+            int: Pulse width in microseconds (500-2500)
+        
+        Example:
+            DS3225 (270° range), target = 135°
+            -> Ratio = 135/270 = 0.5
+            -> Pulse = 500 + (0.5 * 2000) = 1500us
+        """
+        # Get motor specs (with defaults for 180° motors)
+        actuation_range = motor_config.get("actuation_range", 180)
+        pulse_min = motor_config.get("pulse_min", 500)
+        pulse_max = motor_config.get("pulse_max", 2500)
+        
+        # Clamp target to valid range
+        target_physical_deg = max(0, min(actuation_range, target_physical_deg))
+        
+        # Calculate pulse width
+        ratio = target_physical_deg / actuation_range
+        pulse_us = pulse_min + (ratio * (pulse_max - pulse_min))
+        
+        # Clamp to safe range
+        pulse_us = max(500, min(2500, int(pulse_us)))
+        
+        return pulse_us
+    
     def virtual_to_physical(self, virtual_angle, motor_config):
         """
         Convert Arduino virtual angle back to physical angle (for display/FK).
@@ -99,6 +133,29 @@ class PulseMapper:
         physical_angle = ratio * actuation_range
         
         return max(0, min(actuation_range, physical_angle))
+
+    def pulse_to_angle(self, pulse_us, motor_config):
+        """
+        Convert pulse width (us) back to physical angle (for display).
+        
+        Args:
+            pulse_us: Pulse width in microseconds
+            motor_config: Dict with 'actuation_range', 'pulse_min', 'pulse_max'
+        
+        Returns:
+            float: Physical angle (approximate)
+        """
+        actuation_range = motor_config.get("actuation_range", 180)
+        pulse_min = motor_config.get("pulse_min", 500)
+        pulse_max = motor_config.get("pulse_max", 2500)
+        
+        # Calculate ratio from pulse
+        ratio = (pulse_us - pulse_min) / (pulse_max - pulse_min)
+        
+        # Convert to angle
+        angle = ratio * actuation_range
+        
+        return max(0, min(actuation_range, angle))
 
 
 # Self-test

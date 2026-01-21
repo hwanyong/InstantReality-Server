@@ -1,14 +1,16 @@
 /*
- * Robot Controller Arduino Sketch (Non-blocking Version)
+ * Robot Controller Arduino Sketch (Pass-Through Mode)
  * Controls PCA9685 PWM driver via serial commands
  * 
  * Protocol:
  *   P              : Ping (Response: PONG)
- *   S <ch> <angle> : Set Servo angle
+ *   S <ch> <angle> : Set Servo angle (legacy, 0-180)
+ *   W <ch> <us>    : Write Microseconds directly (500-2500)
  *   R <ch>         : Release single servo
  *   X              : Release all servos
  * 
  * NOTE: Uses non-blocking serial parser to avoid freezing.
+ * NOTE: Pass-Through mode - Python calculates pulse, Arduino executes.
  */
 
 #include <Wire.h>
@@ -17,10 +19,14 @@
 // PCA9685 driver
 Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver();
 
-// Servo constants
-#define SERVO_MIN  150
-#define SERVO_MAX  600
-#define SERVO_FREQ 50
+// PWM Constants
+#define PWM_FREQ 50           // 50Hz = 20ms period
+#define PWM_RESOLUTION 4096   // 12-bit
+#define PERIOD_US 20000       // 20ms in microseconds
+
+// Safety limits for pulse width (microseconds)
+#define PULSE_MIN 500
+#define PULSE_MAX 2500
 
 // Serial Buffer
 String inputString = "";
@@ -28,17 +34,14 @@ boolean stringComplete = false;
 
 void setup() {
     Serial.begin(115200);
-    // Non-blocking parser doesn't rely on timeout, 
-    // but setting it low is good practice just in case.
-    Serial.setTimeout(10); 
+    Serial.setTimeout(10);
     
-    while (!Serial) { ; } // Wait for Leo
+    while (!Serial) { ; } // Wait for Leonardo
     
     pwm.begin();
     pwm.setOscillatorFrequency(27000000);
-    pwm.setPWMFreq(SERVO_FREQ);
+    pwm.setPWMFreq(PWM_FREQ);
     
-    // Pre-allocate buffer to avoid fragmentation
     inputString.reserve(50);
     
     delay(10);
@@ -51,7 +54,6 @@ void loop() {
         
         if (inChar == '\n') {
             stringComplete = true;
-            // Don't append \n to string
         } else if (inChar == '\r') {
             // Ignore CR
         } else {
@@ -77,13 +79,24 @@ void processCommand(String cmd) {
             Serial.println("PONG");
             break;
             
-        case 'S': { // Set Servo: S 0 90
-            // Parse using sscanf is safer and non-blocking
-            // (compared to repeated parseInt calls)
+        case 'S': { // Legacy: Set Servo angle (0-180)
             int ch, angle;
-            // Skip first char 'S' and space (index 2)
             if (sscanf(cmd.c_str() + 1, "%d %d", &ch, &angle) == 2) {
-                setServo(ch, angle);
+                // Convert angle to microseconds (legacy support)
+                angle = constrain(angle, 0, 180);
+                int us = map(angle, 0, 180, PULSE_MIN, PULSE_MAX);
+                writeMicroseconds(ch, us);
+                Serial.println("OK");
+            } else {
+                Serial.println("ERR_PARSE");
+            }
+            break;
+        }
+        
+        case 'W': { // Write Microseconds: W 0 1500
+            int ch, us;
+            if (sscanf(cmd.c_str() + 1, "%d %d", &ch, &us) == 2) {
+                writeMicroseconds(ch, us);
                 Serial.println("OK");
             } else {
                 Serial.println("ERR_PARSE");
@@ -114,9 +127,16 @@ void processCommand(String cmd) {
     }
 }
 
-void setServo(int ch, int angle) {
+void writeMicroseconds(int ch, int us) {
+    // Safety: Clamp channel and pulse width
     ch = constrain(ch, 0, 15);
-    angle = constrain(angle, 0, 180);
-    int pulse = map(angle, 0, 180, SERVO_MIN, SERVO_MAX);
-    pwm.setPWM(ch, 0, pulse);
+    us = constrain(us, PULSE_MIN, PULSE_MAX);
+    
+    // Convert microseconds to PWM ticks
+    // Formula: ticks = (us / period_us) * resolution
+    // = (us * 4096) / 20000
+    uint16_t ticks = (uint32_t)us * PWM_RESOLUTION / PERIOD_US;
+    
+    pwm.setPWM(ch, 0, ticks);
 }
+

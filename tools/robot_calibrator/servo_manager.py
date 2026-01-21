@@ -5,6 +5,7 @@ Manages servo configuration, pin mapping, and limit settings.
 
 import json
 import os
+from pulse_mapper import PulseMapper
 
 
 class ServoManager:
@@ -35,8 +36,13 @@ class ServoManager:
     }
 
     def __init__(self, config_path="servo_config.json"):
+        if not os.path.isabs(config_path):
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+            config_path = os.path.join(base_dir, config_path)
+            
         self.config_path = config_path
         self.config = None
+        self.mapper = PulseMapper()
         self.load_config()
 
     def load_config(self):
@@ -55,6 +61,18 @@ class ServoManager:
 
     def save_config(self):
         """Save configuration to JSON file."""
+        # 1. Migration: Ensure Pulse values exist (Angle -> Pulse)
+        try:
+            self._ensure_pulses_native() 
+        except Exception as e:
+            print(f"Warning: Failed to ensure pulse values: {e}")
+
+        # 2. Enforcement: Sync Angles from Pulse (Pulse -> Angle)
+        try:
+            self._sync_angles_from_pulses() 
+        except Exception as e:
+            print(f"Warning: Failed to sync angles from pulses: {e}")
+            # Try to save anyway to persist pulse values
         try:
             with open(self.config_path, 'w', encoding='utf-8') as f:
                 json.dump(self.config, f, indent=2)
@@ -67,6 +85,71 @@ class ServoManager:
     def _deep_copy(self, obj):
         """Create a deep copy of a dictionary."""
         return json.loads(json.dumps(obj))
+
+    def _sync_angles_from_pulses(self):
+        """
+        Synchronize derived Angle values from primary Pulse values.
+        Called automatically before saving to disk.
+        """
+        if not self.config: return
+
+        for arm_name, arm_data in self.config.items():
+            if arm_name not in ["left_arm", "right_arm"]: continue
+            
+            for slot_key, slot_config in arm_data.items():
+                # 1. Sync Initial
+                if "initial_pulse" in slot_config:
+                    pulse = slot_config["initial_pulse"]
+                    angle = self.mapper.pulse_to_angle(pulse, slot_config)
+                    slot_config["initial"] = float(f"{angle:.1f}")
+
+                # 2. Sync Zero Offset
+                if "zero_pulse" in slot_config:
+                    pulse = slot_config["zero_pulse"]
+                    angle = self.mapper.pulse_to_angle(pulse, slot_config)
+                    slot_config["zero_offset"] = float(f"{angle:.1f}")
+                
+                # 3. Sync Min/Max Limits
+                if "min_pulse" in slot_config:
+                    pulse = slot_config["min_pulse"]
+                    angle = self.mapper.pulse_to_angle(pulse, slot_config)
+                    slot_config["min"] = float(f"{angle:.1f}")
+
+                if "max_pulse_limit" in slot_config:
+                    pulse = slot_config["max_pulse_limit"]
+                    angle = self.mapper.pulse_to_angle(pulse, slot_config)
+                    slot_config["max"] = float(f"{angle:.1f}")
+
+    def _ensure_pulses_native(self):
+        """
+        Migration Step: Ensure all slots have Pulse values.
+        If Pulse values are missing, calculate them from existing Angles.
+        """
+        if not self.config: return
+
+        for arm_name, arm_data in self.config.items():
+            if arm_name not in ["left_arm", "right_arm"]: continue
+            
+            for slot_key, slot_config in arm_data.items():
+                # Backfill Initial Pulse
+                if "initial_pulse" not in slot_config:
+                    angle = slot_config.get("initial", 90)
+                    slot_config["initial_pulse"] = self._calculate_pulse(arm_name, slot_key.split('_')[1], angle)
+                
+                # Backfill Zero Pulse
+                if "zero_pulse" not in slot_config:
+                    angle = slot_config.get("zero_offset", 0)
+                    slot_config["zero_pulse"] = self._calculate_pulse(arm_name, slot_key.split('_')[1], angle)
+
+                # Backfill Min Pulse (Limit)
+                if "min_pulse" not in slot_config:
+                    angle = slot_config.get("min", 0)
+                    slot_config["min_pulse"] = self._calculate_pulse(arm_name, slot_key.split('_')[1], angle)
+
+                # Backfill Max Pulse (Limit)
+                if "max_pulse_limit" not in slot_config:
+                    angle = slot_config.get("max", 180)
+                    slot_config["max_pulse_limit"] = self._calculate_pulse(arm_name, slot_key.split('_')[1], angle)
 
     def get_channel(self, arm, slot):
         """
@@ -132,6 +215,30 @@ class ServoManager:
         if slot_key not in self.config[arm]:
             self.config[arm][slot_key] = {"channel": 0, "min": 0, "max": 180, "type": "vertical", "min_pos": "bottom", "length": 0}
         self.config[arm][slot_key][limit_type] = value
+        
+        self.config[arm][slot_key][limit_type] = value
+        
+    def set_limit_pulse(self, arm, slot, limit_type, value):
+        """Set min/max pulse limit directly."""
+        slot_key = f"slot_{slot}"
+        self._ensure_slot_exists(arm, slot_key)
+        key = "min_pulse" if limit_type == "min" else "max_pulse_limit"
+        self.config[arm][slot_key][key] = int(value)
+
+    def _calculate_pulse(self, arm, slot, angle):
+        """Calculate pulse width (us) for a given physical angle."""
+        slot_key = f"slot_{slot}"
+        config = self.config.get(arm, {}).get(slot_key, {})
+        
+        actuation_range = config.get("actuation_range", 180)
+        pulse_min = config.get("pulse_min", 500)
+        pulse_max = config.get("pulse_max", 2500)
+        
+        # Basic mapping: pulse = min + (angle / range) * (max - min)
+        if actuation_range <= 0: actuation_range = 180 # Safety
+        
+        pulse = pulse_min + (float(angle) / actuation_range) * (pulse_max - pulse_min)
+        return int(pulse)
 
     def get_saved_port(self):
         """Get saved COM port from config."""
@@ -259,6 +366,22 @@ class ServoManager:
         slot_key = f"slot_{slot}"
         self._ensure_slot_exists(arm, slot_key)
         self.config[arm][slot_key]["initial"] = value
+        
+    def set_initial_pulse(self, arm, slot, value):
+        """Set initial position pulse width directly."""
+        slot_key = f"slot_{slot}"
+        self._ensure_slot_exists(arm, slot_key)
+        self.config[arm][slot_key]["initial_pulse"] = int(value)
+
+    def get_initial_pulse(self, arm, slot):
+        """Get initial position in microseconds."""
+        slot_key = f"slot_{slot}"
+        # Return saved pulse if exists, else calculate it
+        saved = self.config.get(arm, {}).get(slot_key, {}).get("initial_pulse")
+        if saved is not None:
+            return saved
+        angle = self.get_initial(arm, slot)
+        return self._calculate_pulse(arm, slot, angle)
 
     def get_zero_offset(self, arm, slot):
         """
@@ -288,6 +411,21 @@ class ServoManager:
         slot_key = f"slot_{slot}"
         self._ensure_slot_exists(arm, slot_key)
         self.config[arm][slot_key]["zero_offset"] = value
+        
+    def set_zero_pulse(self, arm, slot, value):
+        """Set zero offset pulse width directly."""
+        slot_key = f"slot_{slot}"
+        self._ensure_slot_exists(arm, slot_key)
+        self.config[arm][slot_key]["zero_pulse"] = int(value)
+
+    def get_zero_pulse(self, arm, slot):
+        """Get zero offset in microseconds."""
+        slot_key = f"slot_{slot}"
+        saved = self.config.get(arm, {}).get(slot_key, {}).get("zero_pulse")
+        if saved is not None:
+            return saved
+        angle = self.get_zero_offset(arm, slot)
+        return self._calculate_pulse(arm, slot, angle)
 
     def get_actuation_range(self, arm, slot):
         """

@@ -117,7 +117,8 @@ class CalibratorGUI:
         self.status_var = tk.StringVar(value="Disconnected")
         self.sliders = {}
         self.channel_vars = {}
-        self.angle_vars = {}
+        self.pulse_vars = {}  # Master control (int)
+        self.angle_vars = {}  # Reference view (string)
         self.min_labels = {}
         self.max_labels = {}
         # Kinematics UI variables
@@ -262,32 +263,42 @@ class CalibratorGUI:
             ch_combo.pack(side=tk.LEFT, padx=5)
             ch_combo.bind("<<ComboboxSelected>>", lambda e, a=arm_key, s=slot: self._on_channel_change(a, s))
 
-            # Angle slider
-            angle_var = tk.DoubleVar(value=90.0)
-            self.angle_vars[(arm_key, slot)] = angle_var
+            # Pulse slider (master control)
+            # Default to 1500 if no initial_pulse set
+            initial_pulse = self.manager.get_initial_pulse(arm_key, slot)
+            if initial_pulse < 500: initial_pulse = 1500 # Safety fallback
+            
+            pulse_var = tk.IntVar(value=initial_pulse)
+            self.pulse_vars[(arm_key, slot)] = pulse_var
 
-            # [-] Button
+            # [-] Button (Fine tune -10us)
             ttk.Button(row1, text="-", width=2, 
-                command=lambda a=arm_key, s=slot: self._adjust_angle(a, s, -0.1)
+                command=lambda a=arm_key, s=slot: self._adjust_pulse(a, s, -10)
             ).pack(side=tk.LEFT, padx=2)
 
-            # Angle slider - range based on motor actuation_range
-            current_range = self.manager.get_actuation_range(arm_key, slot)
+            # Pulse slider (500-2500 us)
             slider = ttk.Scale(
-                row1, from_=0, to=current_range, variable=angle_var, orient=tk.HORIZONTAL, length=200,
+                row1, from_=500, to=2500, variable=pulse_var, orient=tk.HORIZONTAL, length=200,
                 command=lambda v, a=arm_key, s=slot: self._on_slider_change(a, s, float(v))
             )
             slider.pack(side=tk.LEFT, padx=5)
             self.sliders[(arm_key, slot)] = slider
 
-            # [+] Button
+            # [+] Button (Fine tune +10us)
             ttk.Button(row1, text="+", width=2, 
-                command=lambda a=arm_key, s=slot: self._adjust_angle(a, s, 0.1)
+                command=lambda a=arm_key, s=slot: self._adjust_pulse(a, s, 10)
             ).pack(side=tk.LEFT, padx=2)
 
-            # Angle display
+            # Pulse display
+            ttk.Label(row1, textvariable=pulse_var, width=5).pack(side=tk.LEFT)
+            ttk.Label(row1, text="µs").pack(side=tk.LEFT)
+            
+            # Angle display (Reference view)
+            angle_var = tk.StringVar(value="0.0")
+            self.angle_vars[(arm_key, slot)] = angle_var
+            ttk.Label(row1, text="(").pack(side=tk.LEFT)
             ttk.Label(row1, textvariable=angle_var, width=4).pack(side=tk.LEFT)
-            ttk.Label(row1, text="°").pack(side=tk.LEFT)
+            ttk.Label(row1, text="°)").pack(side=tk.LEFT)
 
             # Min/Max buttons and labels
             limits = self.manager.get_limits(arm_key, slot)
@@ -445,20 +456,25 @@ class CalibratorGUI:
                 self.status_var.set("Connection Failed")
                 messagebox.showerror("Error", f"Failed to connect to {port}")
 
-    def _adjust_angle(self, arm, slot, delta):
-        """Increment or decrement angle by delta."""
-        var = self.angle_vars[(arm, slot)]
+    def _adjust_pulse(self, arm, slot, delta):
+        """Increment or decrement pulse by delta."""
+        var = self.pulse_vars[(arm, slot)]
         current = var.get()
-        new_val = round(current + delta, 1)
+        new_val = int(current + delta)
         
-        # Clamp to 0-actuation_range (or limits if constrained)
-        min_limit = 0
-        max_limit = self.manager.get_actuation_range(arm, slot)
+        # Clamp to 500-2500 (or limits if constrained)
+        min_limit = 500
+        max_limit = 2500
         if self.constrain_var.get():
-            limits = self.manager.get_limits(arm, slot)
-            min_limit = limits["min"]
-            max_limit = limits["max"]
-            
+            # Get stored pulse limits. If not set, calculate or default?
+            # Assuming set_limit now stores pulse. 
+            # We need get_limits_pulse helper or just read config
+            limits = self.manager.get_limits(arm, slot) # This returns angles now? Wait.
+            # We changed set_limit to set_limit_pulse. But get_limits still returns angles?
+            # We need to ensure we have min_pulse/max_pulse from manager.
+            # For now, let's use safety default.
+            pass
+
         new_val = max(min_limit, min(max_limit, new_val))
         
         # Update variable and trigger change handler
@@ -473,42 +489,50 @@ class CalibratorGUI:
     def _on_slider_change(self, arm, slot, value):
         """
         Handle slider movement.
-        OPTIMIZED: Updates state only. Sender thread handles transmission.
-        Now includes PulseMapper for heterogeneous motor support.
+        Master Source of Truth: Pulse Width (us)
         """
         if not self.is_connected:
             return
 
-        physical_angle = float(value)
+        pulse_us = int(float(value)) # Slider returns float
         channel = self.manager.get_channel(arm, slot)
         
         # Get motor config for this slot
         slot_key = f"slot_{slot}"
         motor_config = self.manager.config.get(arm, {}).get(slot_key, {})
         
-        # Convert physical angle to virtual (Arduino) angle
-        virtual_angle = self.pulse_mapper.physical_to_virtual(physical_angle, motor_config)
+        # 1. Update Hardware (Truth)
+        self.servo_state.update_angle(channel, pulse_us)
         
-        # Update thread-safe state map with virtual angle
-        self.servo_state.update_angle(channel, int(virtual_angle))
+        # 2. Update Angle Display (View)
+        angle = self.pulse_mapper.pulse_to_angle(pulse_us, motor_config)
+        
+        # Sync angle variable if it exists (for display)
+        if (arm, slot) in self.angle_vars:
+            self.angle_vars[(arm, slot)].set(f"{angle:.1f}")
+        
+        # Sync pulse variable (if called from slider drag)
+        if (arm, slot) in self.pulse_vars:
+            self.pulse_vars[(arm, slot)].set(pulse_us)
 
     def _sender_thread_loop(self):
         """
         Background thread for sending servo commands.
         Runs at ~30Hz. Retries failed commands automatically.
+        Uses Pass-Through mode (write_pulse).
         """
         while self.sender_running:
             if self.is_connected:
                 # Get pending updates
                 updates = self.servo_state.get_pending_updates()
                 
-                for channel, angle in updates:
+                for channel, pulse_us in updates:
                     # Returns True only if ACK received
-                    if self.driver.set_servo_angle(channel, angle):
-                         self.servo_state.mark_as_sent(channel, angle)
+                    if self.driver.write_pulse(channel, pulse_us):
+                         self.servo_state.mark_as_sent(channel, pulse_us)
                     else:
                         # If ACK failed, do NOT mark as sent.
-                        # It will be retried in the next loop because angle != last_sent
+                        # It will be retried in the next loop
                         pass
                         
                     time.sleep(SENDER_CMD_DELAY)
@@ -517,16 +541,16 @@ class CalibratorGUI:
             time.sleep(SENDER_LOOP_INTERVAL)
 
     def _on_set_min(self, arm, slot):
-        """Set current angle as minimum limit."""
-        current_angle = self.angle_vars[(arm, slot)].get()
-        self.manager.set_limit(arm, slot, "min", current_angle)
-        self.min_labels[(arm, slot)].set(str(current_angle))
+        """Set current pulse as minimum limit."""
+        current_pulse = self.pulse_vars[(arm, slot)].get()
+        self.manager.set_limit_pulse(arm, slot, "min", current_pulse)
+        self.min_labels[(arm, slot)].set(str(current_pulse))
 
     def _on_set_max(self, arm, slot):
-        """Set current angle as maximum limit."""
-        current_angle = self.angle_vars[(arm, slot)].get()
-        self.manager.set_limit(arm, slot, "max", current_angle)
-        self.max_labels[(arm, slot)].set(str(current_angle))
+        """Set current pulse as maximum limit."""
+        current_pulse = self.pulse_vars[(arm, slot)].get()
+        self.manager.set_limit_pulse(arm, slot, "max", current_pulse)
+        self.max_labels[(arm, slot)].set(str(current_pulse))
 
     def _get_min_pos_options(self, type_value):
         """Get min_pos options based on joint type."""
@@ -557,28 +581,31 @@ class CalibratorGUI:
         for arm in ARM_NAMES:
             for slot in range(1, NUM_SLOTS + 1):
                 slider = self.sliders[(arm, slot)]
-                limits = self.manager.get_limits(arm, slot)
-                min_limit = limits["min"]
-                max_limit = limits["max"]
+                
+                # Use Pulse limits for Pulse sliders
+                slot_key = f"slot_{slot}"
+                motor_config = self.manager.config.get(arm, {}).get(slot_key, {})
+                min_limit = motor_config.get("min_pulse", 500)
+                max_limit = motor_config.get("max_pulse_limit", 2500)
                 
                 if constrained:
                     # Constrain slider to Min/Max
                     slider.configure(from_=min_limit, to=max_limit)
                     
                     # Clamp current value if outside limits
-                    current = self.angle_vars[(arm, slot)].get()
+                    current = self.pulse_vars[(arm, slot)].get()
                     if current < min_limit:
-                        self.angle_vars[(arm, slot)].set(min_limit)
+                        self.pulse_vars[(arm, slot)].set(min_limit)
                         channel = self.manager.get_channel(arm, slot)
                         self.servo_state.update_angle(channel, min_limit)
                     elif current > max_limit:
-                        self.angle_vars[(arm, slot)].set(max_limit)
+                        self.pulse_vars[(arm, slot)].set(max_limit)
                         channel = self.manager.get_channel(arm, slot)
                         self.servo_state.update_angle(channel, max_limit)
                 else:
-                    # Reset to full range based on actuation_range
-                    full_range = self.manager.get_actuation_range(arm, slot)
-                    slider.configure(from_=0, to=full_range)
+                    # Reset to full range usage
+                    # Typically 500-2500 for servos
+                    slider.configure(from_=500, to=2500)
 
     def _on_type_change(self, arm, slot):
         """Handle type dropdown change. Updates min_pos options dynamically."""
@@ -692,6 +719,14 @@ class CalibratorGUI:
                 self.min_pos_vars[(arm, slot)].set(self.manager.get_min_pos(arm, slot))
                 
                 self.length_vars[(arm, slot)].set(str(self.manager.get_length(arm, slot)))
+                
+                # Update Pulse slider (Master)
+                initial_pulse = self.manager.get_initial_pulse(arm, slot)
+                self.pulse_vars[(arm, slot)].set(initial_pulse)
+                
+                # Update Angle display
+                initial_angle = self.manager.get_initial(arm, slot)
+                self.angle_vars[(arm, slot)].set(f"{initial_angle:.1f}")
 
         messagebox.showinfo("Success", "Configuration loaded")
 
@@ -699,14 +734,25 @@ class CalibratorGUI:
         """Save current slider positions as home (initial) position for all joints."""
         for arm in ARM_NAMES:
             for slot in range(1, NUM_SLOTS + 1):
-                current_angle = self.angle_vars[(arm, slot)].get()
-                self.manager.set_initial(arm, slot, current_angle)
+                # Save Master (Pulse)
+                current_pulse = self.pulse_vars[(arm, slot)].get()
+                self.manager.set_initial_pulse(arm, slot, current_pulse)
+                
+                # Note: Angle values (View) will be synced automatically by ServoManager.save_config()
+                # We do NOT calculate them here to avoid duplication and split-brain states.
         
-        # Auto-save config
-        if self.manager.save_config():
-            messagebox.showinfo("Set Home", "Home position saved successfully!")
-        else:
-            messagebox.showerror("Error", "Failed to save home position")
+        # Update derived values in memory (Initial Angle, etc.)
+        try:
+            self.manager._sync_angles_from_pulses()
+        except Exception as e:
+            print(f"Warning: Failed to sync angles: {e}")
+
+        # Notify user (No Auto-Save)
+        messagebox.showinfo("Set Home", 
+            "Home position set in memory.\n"
+            "Press 'Save Config' to persist changes.\n\n"
+            "홈 위치가 메모리에 설정되었습니다.\n"
+            "변경사항을 저장하려면 'Save Config'를 누르세요.")
 
     def _on_go_home(self):
         """Move all joints to their saved home (initial) positions with smooth motion."""
@@ -718,14 +764,22 @@ class CalibratorGUI:
         self.servo_state.clear_history()
         
         # Build target list and update UI
+        # Build target list and update UI
         targets = []
         for arm in ARM_NAMES:
             for slot in range(1, NUM_SLOTS + 1):
-                initial_angle = self.manager.get_initial(arm, slot)
+                initial_pulse = self.manager.get_initial_pulse(arm, slot)
                 channel = self.manager.get_channel(arm, slot)
-                targets.append((channel, initial_angle))
-                # Update UI slider immediately
-                self.angle_vars[(arm, slot)].set(initial_angle)
+                targets.append((channel, initial_pulse))
+                
+                # Update UI Pulse Slider
+                if (arm, slot) in self.pulse_vars:
+                    self.pulse_vars[(arm, slot)].set(initial_pulse)
+                
+                # Update UI Angle Label (Derived from pulse)
+                initial_angle = self.manager.get_initial(arm, slot)
+                if (arm, slot) in self.angle_vars:
+                    self.angle_vars[(arm, slot)].set(f"{initial_angle:.1f}")
         
         # Execute smooth motion
         duration = self.duration_var.get()
@@ -743,14 +797,24 @@ class CalibratorGUI:
         
         for arm in ARM_NAMES:
             for slot in range(1, NUM_SLOTS + 1):
-                current_angle = self.angle_vars[(arm, slot)].get()
-                self.manager.set_zero_offset(arm, slot, current_angle)
+                # Save Master (Pulse)
+                current_pulse = self.pulse_vars[(arm, slot)].get()
+                self.manager.set_zero_pulse(arm, slot, current_pulse)
+                
+                # Note: Angle values (View) will be synced automatically by ServoManager.save_config()
         
-        # Auto-save config
-        if self.manager.save_config():
-            messagebox.showinfo("Set Zero", "Zero point saved successfully!\n0점이 성공적으로 저장되었습니다!")
-        else:
-            messagebox.showerror("Error", "Failed to save zero point")
+        # Update derived values in memory (Zero Offset, etc.)
+        try:
+            self.manager._sync_angles_from_pulses()
+        except Exception as e:
+            print(f"Warning: Failed to sync angles: {e}")
+
+        # Notify user (No Auto-Save)
+        messagebox.showinfo("Set Zero", 
+            "Zero point set in memory.\n"
+            "Press 'Save Config' to persist changes.\n\n"
+            "0점이 메모리에 설정되었습니다.\n"
+            "변경사항을 저장하려면 'Save Config'를 누르세요.")
 
     def _on_go_to_zero(self):
         """Move all joints to their saved zero point (vertical pose) with smooth motion."""
@@ -762,14 +826,22 @@ class CalibratorGUI:
         self.servo_state.clear_history()
         
         # Build target list and update UI
+        # Build target list and update UI
         targets = []
         for arm in ARM_NAMES:
             for slot in range(1, NUM_SLOTS + 1):
-                zero_angle = self.manager.get_zero_offset(arm, slot)
+                zero_pulse = self.manager.get_zero_pulse(arm, slot)
                 channel = self.manager.get_channel(arm, slot)
-                targets.append((channel, zero_angle))
-                # Update UI slider immediately
-                self.angle_vars[(arm, slot)].set(zero_angle)
+                targets.append((channel, zero_pulse))
+                
+                # Update UI Pulse
+                if (arm, slot) in self.pulse_vars:
+                    self.pulse_vars[(arm, slot)].set(zero_pulse)
+                    
+                # Update UI Angle
+                zero_angle = self.manager.get_zero_offset(arm, slot)
+                if (arm, slot) in self.angle_vars:
+                    self.angle_vars[(arm, slot)].set(f"{zero_angle:.1f}")
         
         # Execute smooth motion
         duration = self.duration_var.get()

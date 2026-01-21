@@ -14,14 +14,16 @@ from datetime import datetime
 
 from serial_driver import SerialDriver
 from servo_manager import ServoManager
+from pulse_mapper import PulseMapper
 
 class AnimationEngine:
     """
     Handles smooth transition between keyframes.
     """
-    def __init__(self, driver, manager):
+    def __init__(self, driver, manager, mapper):
         self.driver = driver
         self.manager = manager
+        self.mapper = mapper
         self.running = False
         self.paused = False
         
@@ -34,8 +36,8 @@ class AnimationEngine:
         for arm in ["left_arm", "right_arm"]:
             for slot in range(1, 7):
                 channel = self.manager.get_channel(arm, slot)
-                initial = self.manager.get_initial(arm, slot)
-                self.current_state[channel] = initial
+                initial_pulse = self.manager.get_initial_pulse(arm, slot)
+                self.current_state[channel] = initial_pulse
 
     def stop(self):
         """Stop animation."""
@@ -61,14 +63,20 @@ class AnimationEngine:
         # Pre-validate and calculating deltas
         for (arm, slot), target_angle in target_keyframe.items():
             channel = self.manager.get_channel(arm, slot)
-            start_angle = self.current_state.get(channel, 0)
+            start_pulse = self.current_state.get(channel, 1500)
             
-            # Clamp target to limits
-            limits = self.manager.get_limits(arm, slot)
-            clamped_target = max(limits["min"], min(limits["max"], target_angle))
+            # Convert Target Angle -> Target Pulse
+            slot_key = f"slot_{slot}"
+            motor_config = self.manager.config.get(arm, {}).get(slot_key, {})
+            target_pulse = self.mapper.physical_to_pulse(target_angle, motor_config)
             
-            start_positions[channel] = start_angle
-            changes[channel] = clamped_target - start_angle
+            # Clamp target to pulse limits
+            min_pulse = motor_config.get("min_pulse", 500)
+            max_pulse_limit = motor_config.get("max_pulse_limit", 2500)
+            clamped_target = max(min_pulse, min(max_pulse_limit, target_pulse))
+            
+            start_positions[channel] = start_pulse
+            changes[channel] = clamped_target - start_pulse
             valid_targets[channel] = clamped_target
 
         # Animation Loop
@@ -82,18 +90,18 @@ class AnimationEngine:
             eased_progress = self.ease_in_out_sine(progress)
             
             for channel, delta in changes.items():
-                start_angle = start_positions[channel]
-                current_angle = start_angle + (delta * eased_progress)
-                self.driver.set_servo_angle(channel, int(current_angle))
-                self.current_state[channel] = current_angle # Update state tracker
+                start_pulse = start_positions[channel]
+                current_pulse = int(start_pulse + (delta * eased_progress))
+                self.driver.write_pulse(channel, current_pulse)
+                self.current_state[channel] = current_pulse # Update state tracker
             
             time.sleep(1.0 / steps)
 
         # Ensure final position is exact
         if self.running:
-            for channel, target_angle in valid_targets.items():
-                self.driver.set_servo_angle(channel, int(target_angle))
-                self.current_state[channel] = target_angle
+            for channel, target_pulse in valid_targets.items():
+                self.driver.write_pulse(channel, int(target_pulse))
+                self.current_state[channel] = target_pulse
 
 class PerformanceRunner:
     def __init__(self):
@@ -104,7 +112,8 @@ class PerformanceRunner:
         
         self.driver = SerialDriver()
         self.manager = ServoManager()
-        self.engine = AnimationEngine(self.driver, self.manager)
+        self.mapper = PulseMapper()
+        self.engine = AnimationEngine(self.driver, self.manager, self.mapper)
         
         self.is_connected = False
         self.port_var = tk.StringVar()

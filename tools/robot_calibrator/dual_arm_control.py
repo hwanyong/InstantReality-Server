@@ -53,6 +53,22 @@ class DualArmController:
                 {"action": "grip", "state": "open"},
                 {"action": "move", "pos": (700, 400), "z": 50},
             ]
+        },
+        "max_rect": {
+            "name": "Max Rectangle (Left Arm)",
+            "actions": [
+                # Draw largest reachable rectangle at Z=50mm
+                # Bottom-Left corner
+                {"action": "move", "pos": (125, 833), "z": 50},
+                # Bottom-Right corner
+                {"action": "move", "pos": (425, 833), "z": 50},
+                # Top-Right corner
+                {"action": "move", "pos": (425, 433), "z": 50},
+                # Top-Left corner
+                {"action": "move", "pos": (125, 433), "z": 50},
+                # Return to start
+                {"action": "move", "pos": (125, 833), "z": 50},
+            ]
         }
     }
     

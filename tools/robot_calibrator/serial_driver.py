@@ -2,7 +2,8 @@
 Serial Driver for Arduino Robot Controller
 Uses raw serial commands to control PCA9685 via Arduino.
 Protocol:
-  S <ch> <angle>  : Set Servo (e.g., S 0 90)
+  S <ch> <angle>  : Set Servo (legacy, 0-180)
+  W <ch> <us>     : Write Microseconds (500-2500)
   R <ch>          : Release Servo
   X               : Release All
   P               : Ping (Response: PONG)
@@ -112,12 +113,25 @@ class SerialDriver:
 
     def set_servo_angle(self, channel, angle):
         """
-        Set servo angle.
+        Set servo angle (legacy mode).
         Returns True if successful (ACK received).
         """
         # Clamp angle
         angle = max(0, min(180, int(angle)))
         return self._send_command(f"S {channel} {angle}", wait_ack=True)
+
+    def write_pulse(self, channel, microseconds):
+        """
+        Write pulse width directly in microseconds (Pass-Through mode).
+        Returns True if successful (ACK received).
+        
+        Args:
+            channel: PCA9685 channel (0-15)
+            microseconds: Pulse width in us (500-2500)
+        """
+        # Safety clamp on Python side as well
+        microseconds = max(500, min(2500, int(microseconds)))
+        return self._send_command(f"W {channel} {microseconds}", wait_ack=True)
 
     def release_channel(self, channel):
         """Release specific servo."""
@@ -129,3 +143,4 @@ class SerialDriver:
 
 if __name__ == "__main__":
     pass
+

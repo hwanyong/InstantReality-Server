@@ -303,47 +303,55 @@ class SequenceTester:
             expected_ko = self.DIRECTION_KO.get(expected_dir, expected_dir)
 
             # Step 1: Move to initial position
-            self.action_var.set(f"Moving to Home ({initial}°)...")
-            self._log(f"Testing {arm} Slot {slot}: Moving to initial position {initial}°")
-            self.driver.set_servo_angle(channel, initial)
+            initial_pulse = self.manager.get_initial_pulse(arm, slot)
+            self.action_var.set(f"Moving to Home ({initial_pulse}µs)...")
+            self._log(f"Testing {arm} Slot {slot}: Moving to initial position {initial_pulse}µs")
+            self.driver.write_pulse(channel, initial_pulse)
             time.sleep(1)
 
             # Step 2: Smart direction probing - check available headroom
-            delta = 15
-            positive_headroom = limits["max"] - initial
-            negative_headroom = initial - limits["min"]
+            delta = 150 # approx 15 degrees
+            
+            # Fetch pulse limits
+            slot_key = f"slot_{slot}"
+            slot_config = self.manager.config.get(arm, {}).get(slot_key, {})
+            limit_min = slot_config.get("min_pulse", 500)
+            limit_max = slot_config.get("max_pulse_limit", 2500)
+            
+            positive_headroom = limit_max - initial_pulse
+            negative_headroom = initial_pulse - limit_min
             
             if positive_headroom >= delta:
                 # Normal case: can move in positive direction
-                test_angle = initial + delta
+                test_pulse = initial_pulse + delta
                 move_positive = True
             elif negative_headroom >= delta:
                 # Blocked at max: move in negative direction instead
-                test_angle = initial - delta
+                test_pulse = initial_pulse - delta
                 move_positive = False
                 # Invert expected direction
                 expected_dir = self._get_expected_direction(joint_type, min_pos, positive=False)
                 expected_ko = self.DIRECTION_KO.get(expected_dir, expected_dir)
                 self._log(f"Note: Initial at max, testing negative direction instead")
             else:
-                # Both directions blocked (very small range)
-                self._log(f"⚠ Warning: Joint has very small range ({limits['min']}-{limits['max']}), testing with reduced delta")
+                # Both directions blocked (very small range) - Try anyway or limit?
+                self._log(f"⚠ Warning: Joint has very small pulse range ({limit_min}-{limit_max}), testing with reduced delta")
                 if positive_headroom > negative_headroom:
-                    test_angle = limits["max"]
+                    test_pulse = limit_max
                     move_positive = True
                 else:
-                    test_angle = limits["min"]
+                    test_pulse = limit_min
                     move_positive = False
                     expected_dir = self._get_expected_direction(joint_type, min_pos, positive=False)
                     expected_ko = self.DIRECTION_KO.get(expected_dir, expected_dir)
             
             self.action_var.set(f"Moving {expected_dir} ({expected_ko})...")
-            self._log(f"Moving to {test_angle}° (Expected: {expected_dir})")
-            self.driver.set_servo_angle(channel, test_angle)
+            self._log(f"Moving to {test_pulse}µs (Expected: {expected_dir})")
+            self.driver.write_pulse(channel, test_pulse)
             time.sleep(1.5)
 
             # Step 3: Return to initial
-            self.driver.set_servo_angle(channel, initial)
+            self.driver.write_pulse(channel, initial_pulse)
 
             # Step 4: Ask user
             self.action_var.set("Waiting for feedback...")

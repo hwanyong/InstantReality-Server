@@ -90,13 +90,14 @@
       "max": 180.0,
       "type": "horizontal",
       "min_pos": "right",
-      "initial": 170.35714285714286,
+      "initial": 66.1,
       "length": 107.0,
       "zero_offset": 170.35714285714286,
       "actuation_range": 180,
       "pulse_min": 500,
       "pulse_max": 2500,
-      "device_name": "DS3225"
+      "device_name": "DS3225",
+      "initial_pulse": 1234
     },
     "slot_2": {
       "channel": 7,
