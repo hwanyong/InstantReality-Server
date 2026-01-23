@@ -1,0 +1,246 @@
+
+import tkinter as tk
+import math
+from .core import VisualWidget
+
+def get_tkinter_offset(joint_type, min_pos):
+    """
+    Get Tkinter angle offset based on min_pos dynamic alignment.
+    Unified offset mapping as per analysis.
+    """
+    if joint_type == "horizontal":
+        return 180 if min_pos == "left" else 0
+    elif joint_type == "vertical":
+        # 'bottom' (6 o'clock) needs 0 offset to map +Angle to CCW (Up) correctly
+        # relative to the 3 o'clock (0 deg) anchor.
+        return 180 
+    return 0
+
+class TopDownWidget(VisualWidget):
+    """
+    Widget for 2D Top-Down (Planar) visualization.
+    Used for Base Yaw (Slot 1) verification.
+    """
+    
+    def __init__(self, canvas, config):
+        """
+        Args:
+            canvas: The tk.Canvas instance to draw on.
+            config: Dict containing:
+                - canvas_size: int (e.g. 300)
+                - scale: float (pixels per mm)
+                - type: str ("horizontal")
+                - min_pos: str
+                - zero_offset: float
+                - actuation_range: float
+                - math_min: float
+                - math_max: float
+        """
+        self.canvas = canvas
+        self.cfg = config
+        self.cx = config['canvas_size'] // 2
+        self.cy = config['canvas_size'] // 2
+        
+    def draw_static(self):
+        """Draw grid, axes, and validity arcs."""
+        self.canvas.delete("static")
+        size = self.cfg['canvas_size']
+        
+        # Grid lines
+        for i in range(0, size + 1, 50):
+            self.canvas.create_line(i, 0, i, size, fill="#333333", dash=(2, 4), tags="static")
+            self.canvas.create_line(0, i, size, i, fill="#333333", dash=(2, 4), tags="static")
+            
+        # Axes
+        self.canvas.create_line(self.cx, 0, self.cx, size, fill="#555555", width=1, tags="static")
+        self.canvas.create_line(0, self.cy, size, self.cy, fill="#555555", width=1, tags="static")
+        
+        # Arcs
+        radius = 140
+        offset = get_tkinter_offset(self.cfg.get('type', 'horizontal'), self.cfg.get('min_pos', 'left'))
+        
+        # Background Arc (Physical Capacity)
+        full_min_math = 0 - self.cfg['zero_offset']
+        self.canvas.create_arc(self.cx - radius, self.cy - radius, 
+                               self.cx + radius, self.cy + radius,
+                               start=full_min_math + offset, extent=self.cfg['actuation_range'],
+                               fill="#222222", outline="#444444", width=1, style=tk.PIESLICE, tags="static")
+                               
+        # Foreground Arc (Math Valid Zone)
+        start_angle = self.cfg['math_min'] + offset
+        extent = self.cfg['math_max'] - self.cfg['math_min']
+        
+        self.canvas.create_arc(self.cx - radius, self.cy - radius, 
+                               self.cx + radius, self.cy + radius,
+                               start=start_angle, extent=extent,
+                               fill="#1a3a1a", outline="#44ff44", width=1, style=tk.PIESLICE, tags="static")
+        
+        # Base Marker
+        self.canvas.create_oval(self.cx - 6, self.cy - 6, self.cx + 6, self.cy + 6, 
+                                fill="#ffffff", outline="#888888", tags="static")
+
+    def update_target(self, x, y, is_valid):
+        """Draw target vector."""
+        self.canvas.delete("dynamic")
+        
+        scale = self.cfg['scale']
+        
+        # Robot Frame (X-Right, Y-Forward) to Canvas Frame (X-Right, Y-Up -> Tkinter Y-Down)
+        # Canvas X = cx + X
+        # Canvas Y = cy - Y  (Inverted Y)
+        
+        target_cx = self.cx + x * scale
+        target_cy = self.cy - y * scale
+        
+        # Clamp visual
+        size = self.cfg['canvas_size']
+        target_cx = max(10, min(size - 10, target_cx))
+        target_cy = max(10, min(size - 10, target_cy))
+        
+        color = "#44ff44" if is_valid else "#ff4444"
+        
+        # Vector
+        self.canvas.create_line(self.cx, self.cy, target_cx, target_cy,
+                                fill=color, width=2, arrow=tk.LAST, tags="dynamic")
+        
+        # Dot
+        self.canvas.create_oval(target_cx - 8, target_cy - 8, target_cx + 8, target_cy + 8,
+                                fill=color, outline="#ffffff", width=2, tags="dynamic")
+
+
+class SideElevationWidget(VisualWidget):
+    """
+    Widget for 2D Side Elevation (R/Z) visualization.
+    Used for Shoulder/Elbow/Wrist verification.
+    """
+    
+    def __init__(self, canvas, config):
+        """
+        Args:
+            canvas: Tkinter canvas.
+            config: Dict containing:
+                - canvas_size: int
+                - scale: float
+                - d1: float (Base Height)
+                - a2: float (Upper Arm)
+                - z_max: float
+                - slot2_params: dict (type, min_pos, zero_offset, polarity, range, min, max)
+                # Note: Polarity and Limits handled by caller, we just need visual params
+        """
+        self.canvas = canvas
+        self.cfg = config
+        self.cx = 120 # Fixed center for shoulder
+        
+    def _get_base_cy(self):
+        scale = self.cfg['scale']
+        z_max = self.cfg.get('z_max', 300)
+        return 30 + z_max * scale
+
+    def _get_shoulder_cy(self):
+        scale = self.cfg['scale']
+        z_max = self.cfg.get('z_max', 300)
+        d1 = self.cfg.get('d1', 107)
+        return 30 + (z_max - d1) * scale
+
+    def draw_static(self):
+        self.canvas.delete("static")
+        size = self.cfg['canvas_size']
+        scale = self.cfg['scale']
+        
+        # Grid
+        for i in range(0, size + 1, 40):
+            self.canvas.create_line(i, 0, i, size, fill="#333", dash=(2, 4), tags="static")
+            self.canvas.create_line(0, i, size, i, fill="#333", dash=(2, 4), tags="static")
+            
+        base_cy = self._get_base_cy()
+        shoulder_cy = self._get_shoulder_cy()
+        shoulder_cx = self.cx
+        
+        # Ground
+        self.canvas.create_line(0, base_cy, size, base_cy, fill="#665544", width=2, tags="static")
+        
+        # Base Tower (d1)
+        self.canvas.create_line(shoulder_cx, base_cy, shoulder_cx, shoulder_cy,
+                                fill="#4488ff", width=4, tags="static")
+                                
+        # Validity Arcs (Shoulder)
+        s2 = self.cfg.get('slot2_params', {})
+        if s2:
+            radius = self.cfg.get('a2', 105) * scale
+            offset = get_tkinter_offset(s2.get('type', 'vertical'), s2.get('min_pos', 'bottom'))
+            polarity = s2.get('polarity', 1)
+            zero_offset = s2.get('zero_offset', 0)
+            
+            # Background Arc (Capacity)
+            # Physical [0, actuation_range] -> Math
+            # Math = (Physical - Zero) / Polarity
+            math_start = (0 - zero_offset) * polarity
+            math_end = (s2.get('actuation_range', 180) - zero_offset) * polarity
+            
+            # Sort for drawing
+            arc_start = min(math_start, math_end)
+            arc_extent = abs(math_end - math_start)
+            
+            self.canvas.create_arc(shoulder_cx-radius, shoulder_cy-radius,
+                                   shoulder_cx+radius, shoulder_cy+radius,
+                                   start=arc_start + offset, extent=arc_extent,
+                                   fill="#222222", outline="#444444", style=tk.PIESLICE, tags="static")
+                                   
+            # Foreground Arc (Valid Zone)
+            math_min = s2.get('math_min', -90)
+            math_max = s2.get('math_max', 90)
+            extent = math_max - math_min
+            
+            self.canvas.create_arc(shoulder_cx-radius, shoulder_cy-radius,
+                                   shoulder_cx+radius, shoulder_cy+radius,
+                                   start=math_min + offset, extent=extent,
+                                   fill="#1a3a1a", outline="#44ff44", style=tk.PIESLICE, tags="static")
+
+        # Joints
+        self.canvas.create_oval(shoulder_cx-4, base_cy-4, shoulder_cx+4, base_cy+4, fill="#fff", tags="static")
+        self.canvas.create_oval(shoulder_cx-4, shoulder_cy-4, shoulder_cx+4, shoulder_cy+4, fill="#88aaff", tags="static")
+
+    def update_target(self, R, theta2, valid2):
+        """
+        Draw ghost arm and target based on angles.
+        Args:
+            R: Target radius (for visual ref)
+            theta2: Shoulder Pitch (deg)
+            valid2: Boolean validity of shoulder
+        """
+        self.canvas.delete("dynamic")
+        
+        scale = self.cfg['scale']
+        size = self.cfg['canvas_size']
+        shoulder_cx = self.cx
+        shoulder_cy = self._get_shoulder_cy()
+        base_cy = self._get_base_cy()
+        
+        # --- 1. Draw Arm (Forward Kinematics) ---
+        
+        # Shoulder Angle on Canvas
+        # Standard Geometric Rendering (0 deg = Right/East)
+        # Visual Angle matches Slider Angle directly.
+        theta2_rad = math.radians(theta2)
+        
+        elbow_cx = shoulder_cx + (self.cfg['a2'] * scale) * math.cos(theta2_rad)
+        elbow_cy = shoulder_cy - (self.cfg['a2'] * scale) * math.sin(theta2_rad) # Y-Up visual
+        
+        # Link 1
+        self.canvas.create_line(shoulder_cx, shoulder_cy, elbow_cx, elbow_cy,
+                                fill="#44ff88", width=3, tags="dynamic")
+        self.canvas.create_oval(elbow_cx-3, elbow_cy-3, elbow_cx+3, elbow_cy+3,
+                                fill="#ffaa44", outline="#fff", tags="dynamic")
+
+        # Link 2 (Elbow -> Wrist) - REMOVED
+        
+        # --- 2. Draw Target Dot (Projected) ---
+        # Since we removed Z from input, we can just draw a vertical line at R?
+        # Or just skip target if R makes no sense without Z. 
+        # But R is from x/y, so it is valid. 
+        # Let's just draw a vertical guideline at R.
+        
+        target_rx = shoulder_cx + R * scale
+        self.canvas.create_line(target_rx, base_cy, target_rx, base_cy - 200, 
+                                fill="#444444", dash=(2,4), tags="dynamic")
+

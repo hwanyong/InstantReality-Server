@@ -43,7 +43,21 @@ class ServoManager:
         self.config_path = config_path
         self.config = None
         self.mapper = PulseMapper()
+        self._observers = []
         self.load_config()
+
+    def add_observer(self, callback):
+        """Register a callback to be notified on config changes."""
+        if callback not in self._observers:
+            self._observers.append(callback)
+
+    def _notify_observers(self):
+        """Notify all observers that config has changed."""
+        for callback in self._observers:
+            try:
+                callback()
+            except Exception as e:
+                print(f"Error notifying observer: {e}")
 
     def load_config(self):
         """Load configuration from JSON file."""
@@ -58,6 +72,8 @@ class ServoManager:
         else:
             self.config = self._deep_copy(self.DEFAULT_CONFIG)
             print("Using default config")
+        
+        self._notify_observers()
 
     def save_config(self):
         """Save configuration to JSON file."""
