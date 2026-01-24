@@ -250,11 +250,14 @@ Side View:
         a2 = getattr(self, 'p2', {}).get('length', 105.0) if hasattr(self, 'p2') else 105.0
         a3 = getattr(self, 'p3', {}).get('length', 150.0) if hasattr(self, 'p3') else 150.0
         
-        # --- 2-Link IK Calculation ---
-        theta2, theta3, is_reachable = self._solve_2link_ik(R, z, d1, a2, a3)
+        # --- 2-Link IK Calculation (Multi-solution) ---
+        theta2, theta3, is_reachable, config_name = self._solve_2link_ik(R, z, d1, a2, a3)
         
-        # Update Target Label
-        self.lbl_target.config(text=f"Target: R={R:.1f} Z={z:.1f}")
+        # Invert θ3 for Slot 3 (min_pos: top)
+        theta3 = -theta3
+        
+        # Update Target Label with configuration
+        self.lbl_target.config(text=f"Target: R={R:.1f} Z={z:.1f} [{config_name}]")
         
         # --- Slot 1 Real-time State ---
         pulse_calc_s1 = "--"
@@ -305,7 +308,8 @@ Side View:
             zero_offset3 = self.p3.get('zero_offset', 0)
             act_range3 = self.p3.get('actuation_range', 180)
             
-            phy_angle_s3 = theta3 + zero_offset3
+            # min_pos: top → phy = zero + theta (after inversion)
+            phy_angle_s3 = zero_offset3 + theta3
             phy_angle_s3 = max(0, min(act_range3, phy_angle_s3))
             
             pulse_val_s3 = mapper.physical_to_pulse(phy_angle_s3, self.p3['motor_config'])
@@ -319,7 +323,7 @@ Side View:
         # --- Warning ---
         warnings = []
         if not is_reachable:
-            warnings.append("Target unreachable")
+            warnings.append(f"{config_name}")
         if not valid2:
             warnings.append("θ2 out of range")
         if not valid3:
@@ -341,8 +345,8 @@ Side View:
     
     def _solve_2link_ik(self, R, z, d1, a2, a3):
         """
-        2-Link Planar IK Solver.
-        Returns: (theta2, theta3, is_reachable)
+        2-Link Planar IK Solver with multiple solutions.
+        Returns: (theta2, theta3, is_reachable, config_name)
         """
         s = z - d1  # Vertical offset from shoulder
         dist_sq = R*R + s*s
@@ -356,24 +360,62 @@ Side View:
             # Pointing fallback: θ2 = atan2(s, R), θ3 = 0
             theta2 = math.degrees(math.atan2(s, R)) if R > 0 else (90.0 if s >= 0 else -90.0)
             theta3 = 0.0
-            return theta2, theta3, False
+            return theta2, theta3, False, "Pointing"
         
         # Elbow angle (θ3) via Law of Cosines
         cos_theta3 = (dist_sq - a2*a2 - a3*a3) / (2 * a2 * a3)
         cos_theta3 = max(-1.0, min(1.0, cos_theta3))
         theta3_rad = math.acos(cos_theta3)
         
-        # Shoulder angle (θ2)
+        # Shoulder angle components
         beta = math.atan2(s, R)
         cos_alpha = (a2*a2 + dist_sq - a3*a3) / (2 * a2 * dist)
         cos_alpha = max(-1.0, min(1.0, cos_alpha))
         alpha = math.acos(cos_alpha)
         
-        # Elbow Up configuration
-        theta2_rad = beta + alpha
-        theta3_val = -theta3_rad  # Relative angle (elbow down)
+        # Calculate both solutions
+        solutions = []
         
-        return math.degrees(theta2_rad), math.degrees(theta3_val), True
+        # Elbow Up: θ2 = β + α, θ3 = -|θ3|
+        theta2_up = math.degrees(beta + alpha)
+        theta3_up = math.degrees(-theta3_rad)
+        if self._is_valid_solution(theta2_up, theta3_up):
+            solutions.append((theta2_up, theta3_up, "Elbow Up"))
+        
+        # Elbow Down: θ2 = β - α, θ3 = +|θ3|
+        theta2_down = math.degrees(beta - alpha)
+        theta3_down = math.degrees(theta3_rad)
+        if self._is_valid_solution(theta2_down, theta3_down):
+            solutions.append((theta2_down, theta3_down, "Elbow Down"))
+        
+        # Select best solution
+        if not solutions:
+            # No valid solution - Pointing fallback
+            theta2 = math.degrees(math.atan2(s, R)) if R > 0 else (90.0 if s >= 0 else -90.0)
+            return theta2, 0.0, False, "No Valid"
+        
+        # Prefer Elbow Up (first valid)
+        best = solutions[0]
+        return best[0], best[1], True, best[2]
+    
+    def _is_valid_solution(self, theta2, theta3):
+        """Check if solution is within joint limits."""
+        if not hasattr(self, 'p2') or not hasattr(self, 'p3'):
+            return True  # No config, assume valid
+        
+        # θ2 range check
+        math_min2 = self.p2.get('math_min', -90)
+        math_max2 = self.p2.get('math_max', 90)
+        if not (math_min2 <= theta2 <= math_max2):
+            return False
+        
+        # θ3 range check
+        math_min3 = self.p3.get('math_min', -90)
+        math_max3 = self.p3.get('math_max', 90)
+        if not (math_min3 <= theta3 <= math_max3):
+            return False
+        
+        return True
     
     def send_command(self, duration):
         """Send command - All 3 slots using IK-calculated angles."""
@@ -401,9 +443,10 @@ Side View:
         phy2 = max(0, min(self.p2.get('actuation_range', 270), theta2 + zero_off2))
         pls2 = mapper.physical_to_pulse(phy2, self.p2['motor_config'])
         
-        # Slot 3
+        # Slot 3 (min_pos: top → phy = zero + theta after inversion)
         zero_off3 = self.p3.get('zero_offset', 0)
-        phy3 = max(0, min(self.p3.get('actuation_range', 270), theta3 + zero_off3))
+        phy3 = zero_off3 + theta3
+        phy3 = max(0, min(self.p3.get('actuation_range', 270), phy3))
         pls3 = mapper.physical_to_pulse(phy3, self.p3['motor_config'])
         
         targets = [

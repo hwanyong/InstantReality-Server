@@ -11,9 +11,9 @@ def get_tkinter_offset(joint_type, min_pos):
     if joint_type == "horizontal":
         return 180 if min_pos == "left" else 0
     elif joint_type == "vertical":
-        # 'bottom' (6 o'clock) needs 0 offset to map +Angle to CCW (Up) correctly
-        # relative to the 3 o'clock (0 deg) anchor.
-        return 180 
+        # top: 0° = 위쪽 → offset 0
+        # bottom: 0° = 아래 → offset 180
+        return 0 if min_pos == "top" else 180
     return 0
 
 class TopDownWidget(VisualWidget):
@@ -450,8 +450,8 @@ class SideElevation3LinkWidget(VisualWidget):
         
         # --- Link 2: Elbow -> Wrist (A3) ---
         a3_px = self._get_a3()
-        # Global angle = θ2 + θ3 (cumulative)
-        global_theta3 = theta2 + theta3
+        # Global angle = θ2 - θ3 (render with original IK direction)
+        global_theta3 = theta2 - theta3
         theta3_rad = math.radians(global_theta3)
         wrist_cx = elbow_cx + a3_px * math.cos(theta3_rad)
         wrist_cy = elbow_cy - a3_px * math.sin(theta3_rad)

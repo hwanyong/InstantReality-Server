@@ -278,10 +278,9 @@ class IKTesterApp:
             # Polarity Logic (Copied/Adapted from Legacy)
             polarity = 1
             if typ == "horizontal" and min_pos == "left": polarity = -1
-            # Vertical: bottom->1. top->-1?
-            # Legacy: if joint_type == "vertical": return 1 (Standard Polarity Fix)
-            if typ == "vertical": polarity = 1 
-            # Note: Legacy _get_physical_polarity was returning 1 for vertical always.
+            # Vertical: bottom->1, top->-1
+            if typ == "vertical":
+                polarity = -1 if min_pos == "top" else 1
             
             # Math Min/Max
             # Range Logic: Apply polarity
