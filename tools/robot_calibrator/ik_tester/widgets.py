@@ -249,3 +249,114 @@ class SideElevationWidget(VisualWidget):
         self.canvas.create_line(shoulder_cx, shoulder_cy, target_rx, target_z_cy,
                                 fill="#ff8888", dash=(2, 4), width=2, tags="dynamic")
 
+
+class SideElevation3LinkWidget(VisualWidget):
+    """
+    Widget for 3-Link Side Elevation (R/Z) visualization.
+    Used for Slot 1+2+3 (Base/Shoulder/Elbow) verification.
+    Phase 2: Hardcoded link lengths, no config binding.
+    """
+    
+    # Hardcoded constants (Phase 2 - no config binding)
+    D1 = 40   # Base height (pixels, scaled)
+    A2 = 40   # Upper arm length (pixels, scaled)
+    A3 = 60   # Forearm length (pixels, scaled)
+    
+    def __init__(self, canvas, config=None):
+        """
+        Args:
+            canvas: Tkinter canvas.
+            config: Optional config dict (not used in Phase 2).
+        """
+        self.canvas = canvas
+        self.cfg = config or {'canvas_size': 240}
+        self.cx = 60  # Fixed center X for base
+        
+    def _get_base_cy(self):
+        """Get base Y coordinate (ground level)."""
+        return self.cfg.get('canvas_size', 240) - 30
+    
+    def _get_shoulder_cy(self):
+        """Get shoulder Y coordinate (top of base tower)."""
+        return self._get_base_cy() - self.D1
+    
+    def draw_static(self):
+        """Draw static elements: grid, ground, base tower."""
+        self.canvas.delete("static")
+        size = self.cfg.get('canvas_size', 240)
+        
+        # Grid
+        for i in range(0, size + 1, 40):
+            self.canvas.create_line(i, 0, i, size, fill="#333", dash=(2, 4), tags="static")
+            self.canvas.create_line(0, i, size, i, fill="#333", dash=(2, 4), tags="static")
+        
+        base_cy = self._get_base_cy()
+        shoulder_cy = self._get_shoulder_cy()
+        
+        # Ground line
+        self.canvas.create_line(0, base_cy, size, base_cy, 
+                               fill="#665544", width=2, tags="static")
+        
+        # Base tower (d1)
+        self.canvas.create_line(self.cx, base_cy, self.cx, shoulder_cy,
+                               fill="#4488ff", width=4, tags="static")
+        
+        # Base joint
+        self.canvas.create_oval(self.cx-4, base_cy-4, self.cx+4, base_cy+4, 
+                               fill="#fff", outline="#888", tags="static")
+        
+        # Shoulder joint
+        self.canvas.create_oval(self.cx-5, shoulder_cy-5, self.cx+5, shoulder_cy+5, 
+                               fill="#88aaff", outline="#fff", width=2, tags="static")
+    
+    def update_target(self, theta2, theta3):
+        """
+        Draw 3-link arm based on angles.
+        Args:
+            theta2: Shoulder angle (deg) - 0 = horizontal right
+            theta3: Elbow angle (deg) - relative to shoulder, 0 = straight
+        """
+        self.canvas.delete("dynamic")
+        
+        shoulder_cx = self.cx
+        shoulder_cy = self._get_shoulder_cy()
+        
+        # --- Link 1: Shoulder -> Elbow (A2) ---
+        theta2_rad = math.radians(theta2)
+        elbow_cx = shoulder_cx + self.A2 * math.cos(theta2_rad)
+        elbow_cy = shoulder_cy - self.A2 * math.sin(theta2_rad)
+        
+        # Draw upper arm
+        self.canvas.create_line(shoulder_cx, shoulder_cy, elbow_cx, elbow_cy,
+                               fill="#44ff88", width=4, tags="dynamic")
+        
+        # Elbow joint
+        self.canvas.create_oval(elbow_cx-4, elbow_cy-4, elbow_cx+4, elbow_cy+4,
+                               fill="#ffaa44", outline="#fff", width=2, tags="dynamic")
+        
+        # --- Link 2: Elbow -> Wrist (A3) ---
+        # Global angle = θ2 + θ3 (cumulative)
+        global_theta3 = theta2 + theta3
+        theta3_rad = math.radians(global_theta3)
+        wrist_cx = elbow_cx + self.A3 * math.cos(theta3_rad)
+        wrist_cy = elbow_cy - self.A3 * math.sin(theta3_rad)
+        
+        # Draw forearm
+        self.canvas.create_line(elbow_cx, elbow_cy, wrist_cx, wrist_cy,
+                               fill="#88ff44", width=3, tags="dynamic")
+        
+        # Wrist joint (end effector)
+        self.canvas.create_oval(wrist_cx-4, wrist_cy-4, wrist_cx+4, wrist_cy+4,
+                               fill="#ff6666", outline="#fff", width=2, tags="dynamic")
+        
+        # --- Angle labels (debug) ---
+        self.canvas.create_text(10, 15, anchor="nw", fill="#aaffaa",
+                               font=("Consolas", 9),
+                               text=f"θ2: {theta2:.1f}°", tags="dynamic")
+        self.canvas.create_text(10, 30, anchor="nw", fill="#ffffaa",
+                               font=("Consolas", 9),
+                               text=f"θ3: {theta3:.1f}° (rel)", tags="dynamic")
+        self.canvas.create_text(10, 45, anchor="nw", fill="#ffaaaa",
+                               font=("Consolas", 9),
+                               text=f"Global: {global_theta3:.1f}°", tags="dynamic")
+
