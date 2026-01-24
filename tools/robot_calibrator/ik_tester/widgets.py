@@ -254,23 +254,43 @@ class SideElevation3LinkWidget(VisualWidget):
     """
     Widget for 3-Link Side Elevation (R/Z) visualization.
     Used for Slot 1+2+3 (Base/Shoulder/Elbow) verification.
-    Phase 2: Hardcoded link lengths, no config binding.
+    Now supports config-based link lengths.
     """
     
-    # Hardcoded constants (Phase 2 - no config binding)
-    D1 = 40   # Base height (pixels, scaled)
-    A2 = 40   # Upper arm length (pixels, scaled)
-    A3 = 60   # Forearm length (pixels, scaled)
+    # Default values (mm) - used when config not provided
+    DEFAULT_D1 = 107.0
+    DEFAULT_A2 = 105.0
+    DEFAULT_A3 = 150.0
+    DEFAULT_SCALE = 0.4  # mm -> px
     
     def __init__(self, canvas, config=None):
         """
         Args:
             canvas: Tkinter canvas.
-            config: Optional config dict (not used in Phase 2).
+            config: Config dict with optional keys:
+                - d1: Base height (mm)
+                - a2: Upper arm length (mm)
+                - a3: Forearm length (mm)
+                - scale: mm to px scale factor
         """
         self.canvas = canvas
         self.cfg = config or {'canvas_size': 240}
         self.cx = 60  # Fixed center X for base
+    
+    def _get_scale(self):
+        return self.cfg.get('scale', self.DEFAULT_SCALE)
+    
+    def _get_d1(self):
+        """Get d1 (base height) in pixels."""
+        return self.cfg.get('d1', self.DEFAULT_D1) * self._get_scale()
+    
+    def _get_a2(self):
+        """Get a2 (upper arm) in pixels."""
+        return self.cfg.get('a2', self.DEFAULT_A2) * self._get_scale()
+    
+    def _get_a3(self):
+        """Get a3 (forearm) in pixels."""
+        return self.cfg.get('a3', self.DEFAULT_A3) * self._get_scale()
         
     def _get_base_cy(self):
         """Get base Y coordinate (ground level)."""
@@ -278,12 +298,13 @@ class SideElevation3LinkWidget(VisualWidget):
     
     def _get_shoulder_cy(self):
         """Get shoulder Y coordinate (top of base tower)."""
-        return self._get_base_cy() - self.D1
+        return self._get_base_cy() - self._get_d1()
     
     def draw_static(self):
-        """Draw static elements: grid, ground, base tower."""
+        """Draw static elements: grid, ground, base tower, Slot 2 Arc."""
         self.canvas.delete("static")
         size = self.cfg.get('canvas_size', 240)
+        scale = self._get_scale()
         
         # Grid
         for i in range(0, size + 1, 40):
@@ -292,10 +313,44 @@ class SideElevation3LinkWidget(VisualWidget):
         
         base_cy = self._get_base_cy()
         shoulder_cy = self._get_shoulder_cy()
+        shoulder_cx = self.cx
         
         # Ground line
         self.canvas.create_line(0, base_cy, size, base_cy, 
                                fill="#665544", width=2, tags="static")
+        
+        # --- Slot 2 Arc (Shoulder) ---
+        s2 = self.cfg.get('slot2_params', {})
+        if s2:
+            radius = self._get_a2()
+            offset = get_tkinter_offset(s2.get('type', 'vertical'), s2.get('min_pos', 'bottom'))
+            polarity = s2.get('polarity', 1)
+            zero_offset = s2.get('zero_offset', 0)
+            
+            # Physical [0, actuation_range] -> Math
+            math_start = (0 - zero_offset) * polarity
+            math_end = (s2.get('actuation_range', 180) - zero_offset) * polarity
+            
+            arc_start = min(math_start, math_end)
+            arc_extent = abs(math_end - math_start)
+            
+            # Background Arc (全範囲) - Slot 2: Blue
+            self.canvas.create_arc(shoulder_cx-radius, shoulder_cy-radius,
+                                   shoulder_cx+radius, shoulder_cy+radius,
+                                   start=arc_start + offset, extent=arc_extent,
+                                   fill="", outline="#2266aa", width=1,
+                                   style=tk.ARC, tags="static")
+            
+            # Foreground Arc (有効範囲) - Slot 2: Blue
+            math_min = s2.get('math_min', -90)
+            math_max = s2.get('math_max', 90)
+            extent = math_max - math_min
+            
+            self.canvas.create_arc(shoulder_cx-radius, shoulder_cy-radius,
+                                   shoulder_cx+radius, shoulder_cy+radius,
+                                   start=math_min + offset, extent=extent,
+                                   fill="", outline="#44aaff", width=2,
+                                   style=tk.ARC, tags="static")
         
         # Base tower (d1)
         self.canvas.create_line(self.cx, base_cy, self.cx, shoulder_cy,
@@ -309,22 +364,81 @@ class SideElevation3LinkWidget(VisualWidget):
         self.canvas.create_oval(self.cx-5, shoulder_cy-5, self.cx+5, shoulder_cy+5, 
                                fill="#88aaff", outline="#fff", width=2, tags="static")
     
-    def update_target(self, theta2, theta3):
+    def update_target(self, theta2, theta3, R=None, Z=None):
         """
-        Draw 3-link arm based on angles.
+        Draw 3-link arm based on angles and optional target point.
         Args:
             theta2: Shoulder angle (deg) - 0 = horizontal right
             theta3: Elbow angle (deg) - relative to shoulder, 0 = straight
+            R: Optional target radius (horizontal distance) for IK
+            Z: Optional target height (mm) for IK
         """
         self.canvas.delete("dynamic")
         
         shoulder_cx = self.cx
         shoulder_cy = self._get_shoulder_cy()
+        base_cy = self._get_base_cy()
+        d1 = self.cfg.get('d1', self.DEFAULT_D1)
+        scale = self.cfg.get('scale', self.DEFAULT_SCALE)
+        
+        # --- Target Point and Guidelines (IK mode) ---
+        if R is not None and Z is not None:
+            target_rx = shoulder_cx + R * scale
+            target_z_cy = shoulder_cy - (Z - d1) * scale
+            
+            # R Guideline (Vertical dashed line)
+            self.canvas.create_line(target_rx, base_cy, target_rx, target_z_cy,
+                                   fill="#88ff88", dash=(4, 4), width=1, tags="dynamic")
+            
+            # Z Guideline (Horizontal dashed line)
+            self.canvas.create_line(shoulder_cx, target_z_cy, target_rx, target_z_cy,
+                                   fill="#ffaa44", dash=(4, 4), width=1, tags="dynamic")
+            
+            # Target Point (Red dot)
+            self.canvas.create_oval(target_rx-5, target_z_cy-5, target_rx+5, target_z_cy+5,
+                                   fill="#ff6666", outline="#fff", width=2, tags="dynamic")
         
         # --- Link 1: Shoulder -> Elbow (A2) ---
+        a2_px = self._get_a2()
         theta2_rad = math.radians(theta2)
-        elbow_cx = shoulder_cx + self.A2 * math.cos(theta2_rad)
-        elbow_cy = shoulder_cy - self.A2 * math.sin(theta2_rad)
+        elbow_cx = shoulder_cx + a2_px * math.cos(theta2_rad)
+        elbow_cy = shoulder_cy - a2_px * math.sin(theta2_rad)
+        
+        # --- Slot 3 Arc (Elbow - Dynamic) ---
+        s3 = self.cfg.get('slot3_params', {})
+        if s3:
+            a3_px = self._get_a3()
+            offset = get_tkinter_offset(s3.get('type', 'vertical'), s3.get('min_pos', 'top'))
+            polarity = s3.get('polarity', 1)
+            zero_offset = s3.get('zero_offset', 0)
+            
+            # Physical [0, actuation_range] -> Math (relative to shoulder line)
+            math_start = (0 - zero_offset) * polarity
+            math_end = (s3.get('actuation_range', 180) - zero_offset) * polarity
+            
+            arc_start = min(math_start, math_end)
+            arc_extent = abs(math_end - math_start)
+            
+            # Apply theta2 rotation (Arc rotates with shoulder)
+            arc_rotation = theta2
+            
+            # Background Arc - Slot 3: Orange
+            self.canvas.create_arc(elbow_cx-a3_px, elbow_cy-a3_px,
+                                   elbow_cx+a3_px, elbow_cy+a3_px,
+                                   start=arc_start + offset + arc_rotation, extent=arc_extent,
+                                   fill="", outline="#aa6622", width=1,
+                                   style=tk.ARC, tags="dynamic")
+            
+            # Foreground Arc - Slot 3: Orange
+            math_min = s3.get('math_min', -90)
+            math_max = s3.get('math_max', 90)
+            extent = math_max - math_min
+            
+            self.canvas.create_arc(elbow_cx-a3_px, elbow_cy-a3_px,
+                                   elbow_cx+a3_px, elbow_cy+a3_px,
+                                   start=math_min + offset + arc_rotation, extent=extent,
+                                   fill="", outline="#ffaa44", width=2,
+                                   style=tk.ARC, tags="dynamic")
         
         # Draw upper arm
         self.canvas.create_line(shoulder_cx, shoulder_cy, elbow_cx, elbow_cy,
@@ -335,11 +449,12 @@ class SideElevation3LinkWidget(VisualWidget):
                                fill="#ffaa44", outline="#fff", width=2, tags="dynamic")
         
         # --- Link 2: Elbow -> Wrist (A3) ---
+        a3_px = self._get_a3()
         # Global angle = θ2 + θ3 (cumulative)
         global_theta3 = theta2 + theta3
         theta3_rad = math.radians(global_theta3)
-        wrist_cx = elbow_cx + self.A3 * math.cos(theta3_rad)
-        wrist_cy = elbow_cy - self.A3 * math.sin(theta3_rad)
+        wrist_cx = elbow_cx + a3_px * math.cos(theta3_rad)
+        wrist_cy = elbow_cy - a3_px * math.sin(theta3_rad)
         
         # Draw forearm
         self.canvas.create_line(elbow_cx, elbow_cy, wrist_cx, wrist_cy,
