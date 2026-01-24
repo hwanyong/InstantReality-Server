@@ -179,7 +179,8 @@ class DualViewTab(BaseTabController):
             self.a2_val = a2 
 
         if p3:
-            self.p3 = p3 
+            self.p3 = p3
+            self.a3 = p3.get('length', 150.0) 
 
         # Update Static Config Dump (Split)
         arm = self.context.get_current_arm()
@@ -232,48 +233,22 @@ class DualViewTab(BaseTabController):
         self.lbl_pulse_s1.config(text=f"Pulse: [sync] -- (R) | {pulse_calc_s1} (C) | {pulse_sent_s1} (S)")
         
         # --- IK Calculation for Slot 2 (Shoulder) ---
-        # Constants
-        d1 = 107.0
-        a2 = 105.0
-        a3 = 150.0 
-        # Attempt to load exacts
-        if hasattr(self, 'p1'): d1 = self.p1.get('length', 107.0)
-        if hasattr(self, 'p2'): a2 = self.p2.get('length', 105.0)
-        if hasattr(self, 'p3'): a3 = self.p3.get('length', 150.0)
+        # Use config-stored values (Slot 2 only)
+        d1 = getattr(self, 'd1_val', 107.0)
+        a2 = getattr(self, 'a2_val', 105.0)
         
         # S: Vertical distance from shoulder pivot
         s = z - d1
         
-        # D: Direct distance
-        D_sq = R**2 + s**2
-        D = math.sqrt(D_sq)
+        # D: Direct distance to target
+        D = math.sqrt(R**2 + s**2)
         
-        theta2 = 0.0
+        # Reachability (Slot 2 length only)
+        max_reach = a2
+        is_reachable = D <= max_reach and D > 0
         
-        # Reachability Check
-        max_reach = a2 + a3
-        min_reach = abs(a3 - a2)
-        
-        # IK Math
-        if min_reach <= D <= max_reach:
-            # Law of Cosines for Theta3
-            cos_t3 = (D_sq - a2**2 - a3**2) / (2 * a2 * a3)
-            cos_t3 = max(-1.0, min(1.0, cos_t3))
-            t3_math = math.degrees(math.acos(cos_t3))
-            
-            # Left Arm uses Elbow Up (-t3)
-            ar = "left_arm"
-            if self.context and self.context.get_current_arm:
-                ar = self.context.get_current_arm()
-            
-            if ar == "left_arm":
-                t3_math = -t3_math 
-            
-            # Theta 2
-            alpha = math.atan2(s, R)
-            beta = math.atan2(a3 * math.sin(math.radians(t3_math)),
-                             a2 + a3 * math.cos(math.radians(t3_math)))
-            theta2 = math.degrees(alpha - beta)
+        # Theta2: Direct direction to target (simplified IK)
+        theta2 = math.degrees(math.atan2(s, R)) if R > 0 else (90.0 if s > 0 else -90.0)
         
         # Update Grey Area Labels
         # 2. Pulse: {Calc} | {Sent}
@@ -311,11 +286,16 @@ class DualViewTab(BaseTabController):
             valid2 = self.p2['math_min'] <= theta2 <= self.p2['math_max']
             
         # Update Side Widget
-        self.side_widget.update_target(R, theta2, valid2)
+        self.side_widget.update_target(R, z, theta2, valid2)
         
         # Config-based Validation
         self.is_valid_target = True  # Default
-        if hasattr(self, 'p2'):
+        
+        # Check reachability first
+        if not is_reachable:
+            self.lbl_warning.config(text=f"⚠️ Unreachable (D={D:.0f} > {max_reach:.0f})")
+            self.is_valid_target = False
+        elif hasattr(self, 'p2'):
             phy_min = self.p2.get('min', 0)
             phy_max = self.p2.get('max', 270)
             

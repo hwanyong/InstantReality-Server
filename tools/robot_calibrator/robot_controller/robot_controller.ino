@@ -39,7 +39,7 @@ void setup() {
     while (!Serial) { ; } // Wait for Leonardo
     
     pwm.begin();
-    pwm.setOscillatorFrequency(27000000);
+    // pwm.setOscillatorFrequency(27000000);
     pwm.setPWMFreq(PWM_FREQ);
     
     inputString.reserve(50);

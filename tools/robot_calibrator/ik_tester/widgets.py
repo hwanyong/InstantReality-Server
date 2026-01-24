@@ -200,11 +200,12 @@ class SideElevationWidget(VisualWidget):
         self.canvas.create_oval(shoulder_cx-4, base_cy-4, shoulder_cx+4, base_cy+4, fill="#fff", tags="static")
         self.canvas.create_oval(shoulder_cx-4, shoulder_cy-4, shoulder_cx+4, shoulder_cy+4, fill="#88aaff", tags="static")
 
-    def update_target(self, R, theta2, valid2):
+    def update_target(self, R, z, theta2, valid2):
         """
         Draw ghost arm and target based on angles.
         Args:
-            R: Target radius (for visual ref)
+            R: Target radius (horizontal distance from base)
+            z: Target height (mm)
             theta2: Shoulder Pitch (deg)
             valid2: Boolean validity of shoulder
         """
@@ -215,32 +216,36 @@ class SideElevationWidget(VisualWidget):
         shoulder_cx = self.cx
         shoulder_cy = self._get_shoulder_cy()
         base_cy = self._get_base_cy()
+        d1 = self.cfg.get('d1', 107)
         
         # --- 1. Draw Arm (Forward Kinematics) ---
-        
-        # Shoulder Angle on Canvas
-        # Standard Geometric Rendering (0 deg = Right/East)
-        # Visual Angle matches Slider Angle directly.
         theta2_rad = math.radians(theta2)
         
         elbow_cx = shoulder_cx + (self.cfg['a2'] * scale) * math.cos(theta2_rad)
-        elbow_cy = shoulder_cy - (self.cfg['a2'] * scale) * math.sin(theta2_rad) # Y-Up visual
+        elbow_cy = shoulder_cy - (self.cfg['a2'] * scale) * math.sin(theta2_rad)
         
-        # Link 1
         self.canvas.create_line(shoulder_cx, shoulder_cy, elbow_cx, elbow_cy,
                                 fill="#44ff88", width=3, tags="dynamic")
         self.canvas.create_oval(elbow_cx-3, elbow_cy-3, elbow_cx+3, elbow_cy+3,
                                 fill="#ffaa44", outline="#fff", tags="dynamic")
-
-        # Link 2 (Elbow -> Wrist) - REMOVED
         
-        # --- 2. Draw Target Dot (Projected) ---
-        # Since we removed Z from input, we can just draw a vertical line at R?
-        # Or just skip target if R makes no sense without Z. 
-        # But R is from x/y, so it is valid. 
-        # Let's just draw a vertical guideline at R.
-        
+        # --- 2. Target Guidelines and Point ---
         target_rx = shoulder_cx + R * scale
-        self.canvas.create_line(target_rx, base_cy, target_rx, base_cy - 200, 
-                                fill="#444444", dash=(2,4), tags="dynamic")
+        target_z_cy = shoulder_cy - (z - d1) * scale
+        
+        # R Guideline (Vertical) - Improved visibility
+        self.canvas.create_line(target_rx, base_cy, target_rx, target_z_cy,
+                                fill="#88ff88", dash=(4, 4), width=1, tags="dynamic")
+        
+        # Z Guideline (Horizontal) - New
+        self.canvas.create_line(shoulder_cx, target_z_cy, target_rx, target_z_cy,
+                                fill="#ffaa44", dash=(4, 4), width=1, tags="dynamic")
+        
+        # Target Point - New
+        self.canvas.create_oval(target_rx-5, target_z_cy-5, target_rx+5, target_z_cy+5,
+                                fill="#ff6666", outline="#fff", width=2, tags="dynamic")
+        
+        # Shoulder -> Target Angle Line - New
+        self.canvas.create_line(shoulder_cx, shoulder_cy, target_rx, target_z_cy,
+                                fill="#ff8888", dash=(2, 4), width=2, tags="dynamic")
 
