@@ -31,6 +31,7 @@ except ImportError as e:
 from .tabs.base import Slot1Tab
 from .tabs.dual_view import DualViewTab
 from .tabs.triple_view import TripleViewTab
+from .tabs.quad_view import QuadViewTab
 
 # Thread Timing
 SENDER_LOOP_INTERVAL = 0.033
@@ -107,6 +108,11 @@ class IKTesterApp:
         t3_frame = ttk.Frame(self.notebook)
         self.notebook.add(t3_frame, text="Slot 1+2+3 IK")
         self.tabs.append(TripleViewTab(t3_frame, self))
+        
+        # Tab 4: Quad View (Full Arm IK)
+        t4_frame = ttk.Frame(self.notebook)
+        self.notebook.add(t4_frame, text="Slot 1+2+3+4 IK")
+        self.tabs.append(QuadViewTab(t4_frame, self))
 
     def _create_styles(self):
         style = ttk.Style()

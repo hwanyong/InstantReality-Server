@@ -475,3 +475,281 @@ class SideElevation3LinkWidget(VisualWidget):
                                font=("Consolas", 9),
                                text=f"Global: {global_theta3:.1f}°", tags="dynamic")
 
+
+class SideElevation4LinkWidget(VisualWidget):
+    """
+    Widget for 4-Link Side Elevation (R/Z) visualization.
+    Extends 3-Link to include Slot 4 (Wrist Pitch).
+    """
+    
+    DEFAULT_D1 = 107.0
+    DEFAULT_A2 = 105.0
+    DEFAULT_A3 = 150.0
+    DEFAULT_A4 = 65.0
+    DEFAULT_SCALE = 0.35
+    
+    def __init__(self, canvas, config=None):
+        self.canvas = canvas
+        self.cfg = config or {'canvas_size': 180}
+        self.cx = 40
+    
+    def _get_scale(self):
+        return self.cfg.get('scale', self.DEFAULT_SCALE)
+    
+    def _get_d1(self):
+        return self.cfg.get('d1', self.DEFAULT_D1) * self._get_scale()
+    
+    def _get_a2(self):
+        return self.cfg.get('a2', self.DEFAULT_A2) * self._get_scale()
+    
+    def _get_a3(self):
+        return self.cfg.get('a3', self.DEFAULT_A3) * self._get_scale()
+    
+    def _get_a4(self):
+        return self.cfg.get('a4', self.DEFAULT_A4) * self._get_scale()
+    
+    def _get_base_cy(self):
+        return self.cfg.get('canvas_size', 180) - 20
+    
+    def _get_shoulder_cy(self):
+        return self._get_base_cy() - self._get_d1()
+    
+    def draw_static(self):
+        """Draw static elements: grid, ground, base."""
+        self.canvas.delete("static")
+        size = self.cfg.get('canvas_size', 180)
+        
+        # Grid
+        for i in range(0, size + 1, 30):
+            self.canvas.create_line(i, 0, i, size, fill="#333", dash=(2, 4), tags="static")
+            self.canvas.create_line(0, i, size, i, fill="#333", dash=(2, 4), tags="static")
+        
+        base_cy = self._get_base_cy()
+        shoulder_cy = self._get_shoulder_cy()
+        
+        # Ground
+        self.canvas.create_line(0, base_cy, size, base_cy, fill="#665544", width=2, tags="static")
+        
+        # Base tower
+        self.canvas.create_line(self.cx, base_cy, self.cx, shoulder_cy,
+                               fill="#4488ff", width=3, tags="static")
+        
+        # Base joint
+        self.canvas.create_oval(self.cx-3, base_cy-3, self.cx+3, base_cy+3,
+                               fill="#fff", outline="#888", tags="static")
+        
+        # Shoulder joint
+        self.canvas.create_oval(self.cx-4, shoulder_cy-4, self.cx+4, shoulder_cy+4,
+                               fill="#88aaff", outline="#fff", width=2, tags="static")
+    
+    def update_target(self, theta2, theta3, theta4):
+        """Draw 4-link arm based on angles. θ4 is projected (X-Y rotation in R-Z view)."""
+        self.canvas.delete("dynamic")
+        
+        shoulder_cx = self.cx
+        shoulder_cy = self._get_shoulder_cy()
+        
+        # Link 1: Shoulder -> Elbow
+        a2_px = self._get_a2()
+        theta2_rad = math.radians(theta2)
+        elbow_cx = shoulder_cx + a2_px * math.cos(theta2_rad)
+        elbow_cy = shoulder_cy - a2_px * math.sin(theta2_rad)
+        
+        self.canvas.create_line(shoulder_cx, shoulder_cy, elbow_cx, elbow_cy,
+                               fill="#44ff88", width=3, tags="dynamic")
+        self.canvas.create_oval(elbow_cx-3, elbow_cy-3, elbow_cx+3, elbow_cy+3,
+                               fill="#ffaa44", outline="#fff", width=2, tags="dynamic")
+        
+        # Link 2: Elbow -> Wrist
+        a3_px = self._get_a3()
+        global_theta3 = theta2 - theta3
+        theta3_rad = math.radians(global_theta3)
+        wrist_cx = elbow_cx + a3_px * math.cos(theta3_rad)
+        wrist_cy = elbow_cy - a3_px * math.sin(theta3_rad)
+        
+        self.canvas.create_line(elbow_cx, elbow_cy, wrist_cx, wrist_cy,
+                               fill="#88ff44", width=2, tags="dynamic")
+        self.canvas.create_oval(wrist_cx-3, wrist_cy-3, wrist_cx+3, wrist_cy+3,
+                               fill="#ff6666", outline="#fff", width=2, tags="dynamic")
+        
+        # Link 3: Wrist -> Gripper (θ4 is X-Y rotation, so project to R-Z)
+        # In side view (R-Z plane), θ4 rotation appears as length scaling
+        a4_px = self._get_a4()
+        a4_projected = a4_px * math.cos(math.radians(theta4))  # Projection
+        
+        # Gripper extends in same direction as wrist (global_theta3)
+        gripper_cx = wrist_cx + a4_projected * math.cos(theta3_rad)
+        gripper_cy = wrist_cy - a4_projected * math.sin(theta3_rad)
+        
+        self.canvas.create_line(wrist_cx, wrist_cy, gripper_cx, gripper_cy,
+                               fill="#ff88ff", width=2, tags="dynamic")
+        self.canvas.create_oval(gripper_cx-3, gripper_cy-3, gripper_cx+3, gripper_cy+3,
+                               fill="#ff44ff", outline="#fff", width=2, tags="dynamic")
+        
+        # Angle label
+        self.canvas.create_text(5, 5, anchor="nw", fill="#ffaaff",
+                               font=("Consolas", 8),
+                               text=f"θ4: {theta4:.1f}° (proj)", tags="dynamic")
+
+
+class WristPitchGaugeWidget(VisualWidget):
+    """
+    Widget for Slot 4 (Wrist Pitch) local angle gauge.
+    Displays arc and pointer for θ4 visualization.
+    """
+    
+    def __init__(self, canvas, config=None):
+        self.canvas = canvas
+        self.cfg = config or {'canvas_size': 120}
+        size = self.cfg.get('canvas_size', 120)
+        self.cx = size // 2
+        self.cy = size // 2 + 10
+        self.radius = size // 2 - 15
+    
+    def draw_static(self):
+        """Draw static gauge background."""
+        self.canvas.delete("static")
+        size = self.cfg.get('canvas_size', 120)
+        
+        # Background arc (full range -90 to +90)
+        self.canvas.create_arc(
+            self.cx - self.radius, self.cy - self.radius,
+            self.cx + self.radius, self.cy + self.radius,
+            start=0, extent=180,
+            fill="#222233", outline="#444466", width=2,
+            style=tk.PIESLICE, tags="static"
+        )
+        
+        # Valid range arc (math_min to math_max)
+        math_min = self.cfg.get('math_min', -90)
+        math_max = self.cfg.get('math_max', 90)
+        start = 90 - math_max
+        extent = math_max - math_min
+        
+        self.canvas.create_arc(
+            self.cx - self.radius + 5, self.cy - self.radius + 5,
+            self.cx + self.radius - 5, self.cy + self.radius - 5,
+            start=start, extent=extent,
+            fill="#1a3a1a", outline="#44ff44", width=2,
+            style=tk.PIESLICE, tags="static"
+        )
+        
+        # Center point
+        self.canvas.create_oval(
+            self.cx - 4, self.cy - 4, self.cx + 4, self.cy + 4,
+            fill="#ffffff", outline="#888888", tags="static"
+        )
+        
+        # Tick marks
+        for angle in [-90, -45, 0, 45, 90]:
+            rad = math.radians(90 - angle)
+            inner_r = self.radius - 8
+            outer_r = self.radius
+            x1 = self.cx + inner_r * math.cos(rad)
+            y1 = self.cy - inner_r * math.sin(rad)
+            x2 = self.cx + outer_r * math.cos(rad)
+            y2 = self.cy - outer_r * math.sin(rad)
+            self.canvas.create_line(x1, y1, x2, y2, fill="#888888", width=1, tags="static")
+    
+    def update_target(self, theta4, is_valid=True):
+        """Update pointer position."""
+        self.canvas.delete("dynamic")
+        
+        # Pointer
+        rad = math.radians(90 - theta4)
+        pointer_len = self.radius - 10
+        px = self.cx + pointer_len * math.cos(rad)
+        py = self.cy - pointer_len * math.sin(rad)
+        
+        color = "#44ff44" if is_valid else "#ff4444"
+        
+        self.canvas.create_line(
+            self.cx, self.cy, px, py,
+            fill=color, width=3, arrow=tk.LAST, tags="dynamic"
+        )
+        
+        # Angle text
+        self.canvas.create_text(
+            self.cx, self.cy + self.radius + 10,
+            text=f"{theta4:.1f}°", fill=color,
+            font=("Consolas", 10, "bold"), tags="dynamic"
+        )
+
+
+class TopDownWristWidget(VisualWidget):
+    """
+    Widget for Slot 4 Top-Down (X-Y) view.
+    Shows wrist position and gripper direction based on θ1 and θ4.
+    """
+    
+    def __init__(self, canvas, config=None):
+        self.canvas = canvas
+        self.cfg = config or {'canvas_size': 120}
+        size = self.cfg.get('canvas_size', 120)
+        self.cx = size // 2
+        self.cy = size // 2
+        self.scale = 0.3  # mm -> px
+    
+    def draw_static(self):
+        """Draw static grid and center."""
+        self.canvas.delete("static")
+        size = self.cfg.get('canvas_size', 120)
+        
+        # Grid
+        for i in range(0, size + 1, 20):
+            self.canvas.create_line(i, 0, i, size, fill="#333", dash=(2, 4), tags="static")
+            self.canvas.create_line(0, i, size, i, fill="#333", dash=(2, 4), tags="static")
+        
+        # Axes
+        self.canvas.create_line(self.cx, 0, self.cx, size, fill="#555", width=1, tags="static")
+        self.canvas.create_line(0, self.cy, size, self.cy, fill="#555", width=1, tags="static")
+        
+        # Center (base)
+        self.canvas.create_oval(self.cx-3, self.cy-3, self.cx+3, self.cy+3,
+                               fill="#4488ff", outline="#fff", tags="static")
+    
+    def update_target(self, theta1, R, a4, theta4):
+        """
+        Draw top-down view with wrist position and gripper direction.
+        Args:
+            theta1: Base yaw angle (deg)
+            R: Horizontal radius from base to wrist (mm)
+            a4: Gripper link length (mm)
+            theta4: Wrist pitch angle (deg) - relative to base direction
+        """
+        self.canvas.delete("dynamic")
+        
+        # Wrist position (from base along θ1)
+        theta1_rad = math.radians(theta1)
+        wrist_x = self.cx + R * self.scale * math.cos(theta1_rad)
+        wrist_y = self.cy - R * self.scale * math.sin(theta1_rad)  # Tkinter Y inverted
+        
+        # Base -> Wrist line (arm projection)
+        self.canvas.create_line(self.cx, self.cy, wrist_x, wrist_y,
+                               fill="#44ff88", width=2, dash=(4, 2), tags="dynamic")
+        
+        # Wrist joint
+        self.canvas.create_oval(wrist_x-4, wrist_y-4, wrist_x+4, wrist_y+4,
+                               fill="#ff6666", outline="#fff", width=2, tags="dynamic")
+        
+        # Gripper direction (θ1 + θ4)
+        gripper_angle = theta1 + theta4
+        gripper_rad = math.radians(gripper_angle)
+        gripper_x = wrist_x + a4 * self.scale * math.cos(gripper_rad)
+        gripper_y = wrist_y - a4 * self.scale * math.sin(gripper_rad)
+        
+        # Wrist -> Gripper line
+        self.canvas.create_line(wrist_x, wrist_y, gripper_x, gripper_y,
+                               fill="#ff88ff", width=3, arrow=tk.LAST, tags="dynamic")
+        
+        # Gripper tip
+        self.canvas.create_oval(gripper_x-3, gripper_y-3, gripper_x+3, gripper_y+3,
+                               fill="#ff44ff", outline="#fff", width=2, tags="dynamic")
+        
+        # Labels
+        self.canvas.create_text(5, 5, anchor="nw", fill="#aaffaa",
+                               font=("Consolas", 8),
+                               text=f"θ1: {theta1:.0f}°", tags="dynamic")
+        self.canvas.create_text(5, 15, anchor="nw", fill="#ffaaff",
+                               font=("Consolas", 8),
+                               text=f"θ4: {theta4:.1f}°", tags="dynamic")
