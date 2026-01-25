@@ -25,8 +25,9 @@ Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver();
 #define PERIOD_US 20000       // 20ms in microseconds
 
 // Safety limits for pulse width (microseconds)
-#define PULSE_MIN 500
-#define PULSE_MAX 2500
+// Extended range for calibration - actual safe range managed by software
+#define PULSE_MIN 0
+#define PULSE_MAX 3000
 
 // Serial Buffer
 String inputString = "";

@@ -103,8 +103,8 @@ class PulseMapper:
         ratio = target_physical_deg / actuation_range
         pulse_us = pulse_min + (ratio * (pulse_max - pulse_min))
         
-        # Clamp to safe range
-        pulse_us = max(500, min(2500, int(pulse_us)))
+        # Clamp to extended range for calibration (actual safe range from config)
+        pulse_us = max(0, min(3000, int(pulse_us)))
         
         return pulse_us
     

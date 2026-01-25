@@ -470,6 +470,47 @@ class ServoManager:
         self._ensure_slot_exists(arm, slot_key)
         self.config[arm][slot_key]["actuation_range"] = value
 
+    def get_pulse_min(self, arm, slot):
+        """Get pulse_min (0-degree reference) for a given slot."""
+        slot_key = f"slot_{slot}"
+        return self.config.get(arm, {}).get(slot_key, {}).get("pulse_min", 500)
+
+    def get_pulse_max(self, arm, slot):
+        """Get pulse_max for a given slot."""
+        slot_key = f"slot_{slot}"
+        return self.config.get(arm, {}).get(slot_key, {}).get("pulse_max", 2500)
+
+    def set_pulse_reference(self, arm, slot, pulse_min_value):
+        """
+        Set pulse_min as 0-degree reference and auto-calculate pulse_max.
+        Also converts all dependent pulse values to maintain physical angles.
+        
+        Args:
+            arm: 'left_arm' or 'right_arm'
+            slot: Slot number (1-6)
+            pulse_min_value: Current pulse to set as 0-degree reference
+        """
+        slot_key = f"slot_{slot}"
+        self._ensure_slot_exists(arm, slot_key)
+        slot_config = self.config[arm][slot_key]
+        
+        # Get old and new pulse_min
+        old_pulse_min = slot_config.get("pulse_min", 500)
+        new_pulse_min = int(pulse_min_value)
+        delta = new_pulse_min - old_pulse_min
+        
+        # Convert dependent pulse values (shift by delta to preserve physical angles)
+        dependent_keys = ["initial_pulse", "zero_pulse", "min_pulse", "max_pulse_limit"]
+        for key in dependent_keys:
+            if key in slot_config:
+                old_val = slot_config[key]
+                new_val = max(0, min(3000, old_val + delta))  # Clamp to 0-3000
+                slot_config[key] = new_val
+        
+        # Set new pulse_min and pulse_max
+        slot_config["pulse_min"] = new_pulse_min
+        slot_config["pulse_max"] = new_pulse_min + 2000  # Fixed 2000us range
+
     def get_all_slots(self):
         """
         Get all slot configurations.

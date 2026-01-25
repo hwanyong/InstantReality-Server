@@ -128,6 +128,7 @@ class CalibratorGUI:
         self.length_vars = {}
         self.actuation_range_vars = {}  # Motor actuation range (180/270)
         self.constrain_var = None  # Slider constraint toggle
+        self.pulse_ref_labels = {}  # Pulse reference (pulse_min) display labels
 
         # Build UI
         self._create_styles()
@@ -266,7 +267,7 @@ class CalibratorGUI:
             # Pulse slider (master control)
             # Default to 1500 if no initial_pulse set
             initial_pulse = self.manager.get_initial_pulse(arm_key, slot)
-            if initial_pulse < 500: initial_pulse = 1500 # Safety fallback
+            if initial_pulse < 0: initial_pulse = 1500 # Safety fallback
             
             pulse_var = tk.IntVar(value=initial_pulse)
             self.pulse_vars[(arm_key, slot)] = pulse_var
@@ -278,7 +279,7 @@ class CalibratorGUI:
 
             # Pulse slider (500-2500 us)
             slider = ttk.Scale(
-                row1, from_=500, to=2500, variable=pulse_var, orient=tk.HORIZONTAL, length=200,
+                row1, from_=0, to=3000, variable=pulse_var, orient=tk.HORIZONTAL, length=200,
                 command=lambda v, a=arm_key, s=slot: self._on_slider_change(a, s, float(v))
             )
             slider.pack(side=tk.LEFT, padx=5)
@@ -363,6 +364,18 @@ class CalibratorGUI:
             range_combo.pack(side=tk.LEFT, padx=2)
             range_combo.bind("<<ComboboxSelected>>", lambda e, a=arm_key, s=slot: self._on_range_change(a, s))
             ttk.Label(row2, text="°").pack(side=tk.LEFT)
+
+            # Set 0° button for pulse calibration
+            ttk.Separator(row2, orient=tk.VERTICAL).pack(side=tk.LEFT, padx=5, fill=tk.Y)
+            ttk.Button(row2, text="Set 0°", width=6,
+                       command=lambda a=arm_key, s=slot: self._on_set_zero_reference(a, s)).pack(side=tk.LEFT, padx=2)
+            
+            # Pulse reference display (pulse_min)
+            pulse_min_val = self.manager.get_pulse_min(arm_key, slot)
+            pulse_ref_label = tk.StringVar(value=str(pulse_min_val))
+            self.pulse_ref_labels[(arm_key, slot)] = pulse_ref_label
+            ttk.Label(row2, textvariable=pulse_ref_label, width=4).pack(side=tk.LEFT)
+            ttk.Label(row2, text="µs").pack(side=tk.LEFT)
 
     def _create_diagnostics_panel(self):
         """Create diagnostics panel."""
@@ -463,8 +476,8 @@ class CalibratorGUI:
         new_val = int(current + delta)
         
         # Clamp to 500-2500 (or limits if constrained)
-        min_limit = 500
-        max_limit = 2500
+        min_limit = 0
+        max_limit = 3000
         if self.constrain_var.get():
             # Get stored pulse limits. If not set, calculate or default?
             # Assuming set_limit now stores pulse. 
@@ -552,6 +565,39 @@ class CalibratorGUI:
         self.manager.set_limit_pulse(arm, slot, "max", current_pulse)
         self.max_labels[(arm, slot)].set(str(current_pulse))
 
+    def _on_set_zero_reference(self, arm, slot):
+        """
+        Set current pulse as 0-degree reference (pulse_min).
+        Automatically calculates pulse_max = pulse_min + 2000.
+        Also converts dependent pulse values to maintain physical angles.
+        """
+        current_pulse = self.pulse_vars[(arm, slot)].get()
+        
+        # Set pulse_min and auto-calculate pulse_max + convert dependent values
+        self.manager.set_pulse_reference(arm, slot, current_pulse)
+        
+        # Update pulse reference label
+        if (arm, slot) in self.pulse_ref_labels:
+            self.pulse_ref_labels[(arm, slot)].set(str(current_pulse))
+        
+        # Update min/max limit labels (they were converted in set_pulse_reference)
+        slot_key = f"slot_{slot}"
+        slot_config = self.manager.config.get(arm, {}).get(slot_key, {})
+        
+        if (arm, slot) in self.min_labels:
+            new_min = slot_config.get("min_pulse", 0)
+            self.min_labels[(arm, slot)].set(str(new_min))
+        
+        if (arm, slot) in self.max_labels:
+            new_max = slot_config.get("max_pulse_limit", 3000)
+            self.max_labels[(arm, slot)].set(str(new_max))
+        
+        # Update angle display to reflect new 0-degree reference
+        motor_config = slot_config
+        angle = self.pulse_mapper.pulse_to_angle(current_pulse, motor_config)
+        if (arm, slot) in self.angle_vars:
+            self.angle_vars[(arm, slot)].set(f"{angle:.1f}")
+
     def _get_min_pos_options(self, type_value):
         """Get min_pos options based on joint type."""
         if type_value == "vertical":
@@ -605,7 +651,7 @@ class CalibratorGUI:
                 else:
                     # Reset to full range usage
                     # Typically 500-2500 for servos
-                    slider.configure(from_=500, to=2500)
+                    slider.configure(from_=0, to=3000)
 
     def _on_type_change(self, arm, slot):
         """Handle type dropdown change. Updates min_pos options dynamically."""

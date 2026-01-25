@@ -129,8 +129,8 @@ class SerialDriver:
             channel: PCA9685 channel (0-15)
             microseconds: Pulse width in us (500-2500)
         """
-        # Safety clamp on Python side as well
-        microseconds = max(500, min(2500, int(microseconds)))
+        # Safety clamp on Python side - extended range for calibration
+        microseconds = max(0, min(3000, int(microseconds)))
         return self._send_command(f"W {channel} {microseconds}", wait_ack=True)
 
     def release_channel(self, channel):
