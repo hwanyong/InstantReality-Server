@@ -2,7 +2,7 @@
   "right_arm": {
     "slot_1": {
       "channel": 0,
-      "min": 0,
+      "min": 0.0,
       "max": 180.0,
       "type": "horizontal",
       "min_pos": "right",
@@ -12,11 +12,15 @@
       "actuation_range": 180,
       "pulse_min": 500,
       "pulse_max": 2500,
-      "device_name": "DS3225"
+      "device_name": "DS3225",
+      "initial_pulse": 500,
+      "zero_pulse": 500,
+      "min_pulse": 500,
+      "max_pulse_limit": 2500
     },
     "slot_2": {
       "channel": 1,
-      "min": 86.78571428571429,
+      "min": 86.7,
       "max": 270.0,
       "min_pos": "bottom",
       "initial": 270.0,
@@ -25,24 +29,32 @@
       "actuation_range": 270,
       "pulse_min": 500,
       "pulse_max": 2500,
-      "device_name": "DS3225"
+      "device_name": "DS3225",
+      "initial_pulse": 2500,
+      "zero_pulse": 2500,
+      "min_pulse": 1142,
+      "max_pulse_limit": 2500
     },
     "slot_3": {
       "channel": 2,
-      "min": 0,
-      "max": 260.0,
+      "min": 0.0,
+      "max": 259.9,
       "min_pos": "bottom",
-      "initial": 260.0,
+      "initial": 259.9,
       "length": 150.0,
-      "zero_offset": 260.0,
+      "zero_offset": 259.9,
       "actuation_range": 270,
       "pulse_min": 500,
       "pulse_max": 2500,
-      "device_name": "DS3225"
+      "device_name": "DS3225",
+      "initial_pulse": 2425,
+      "zero_pulse": 2425,
+      "min_pulse": 500,
+      "max_pulse_limit": 2425
     },
     "slot_4": {
       "channel": 3,
-      "min": 0,
+      "min": 0.0,
       "max": 180.0,
       "type": "horizontal",
       "min_pos": "left",
@@ -52,11 +64,15 @@
       "actuation_range": 180,
       "pulse_min": 500,
       "pulse_max": 2500,
-      "device_name": "DS3225"
+      "device_name": "DS3225",
+      "initial_pulse": 1722,
+      "zero_pulse": 1722,
+      "min_pulse": 500,
+      "max_pulse_limit": 2500
     },
     "slot_5": {
       "channel": 4,
-      "min": 0,
+      "min": 0.0,
       "max": 180.0,
       "type": "roll",
       "min_pos": "ccw",
@@ -66,12 +82,16 @@
       "actuation_range": 180,
       "pulse_min": 500,
       "pulse_max": 2500,
-      "device_name": "MG996R"
+      "device_name": "MG996R",
+      "initial_pulse": 1444,
+      "zero_pulse": 1444,
+      "min_pulse": 500,
+      "max_pulse_limit": 2500
     },
     "slot_6": {
       "channel": 5,
       "min": 0.0,
-      "max": 55.714285714285715,
+      "max": 55.7,
       "type": "gripper",
       "min_pos": "close",
       "initial": 0.0,
@@ -80,7 +100,11 @@
       "actuation_range": 180,
       "pulse_min": 500,
       "pulse_max": 2500,
-      "device_name": "MG996R"
+      "device_name": "MG996R",
+      "initial_pulse": 500,
+      "zero_pulse": 500,
+      "min_pulse": 500,
+      "max_pulse_limit": 1119
     }
   },
   "left_arm": {
@@ -90,17 +114,21 @@
       "max": 180.0,
       "type": "horizontal",
       "min_pos": "right",
-      "initial": 170.35714285714286,
+      "initial": 171.0,
       "length": 107.0,
-      "zero_offset": 170.35714285714286,
+      "zero_offset": 171.0,
       "actuation_range": 180,
       "pulse_min": 500,
       "pulse_max": 2500,
-      "device_name": "DS3225"
+      "device_name": "DS3225",
+      "initial_pulse": 2400,
+      "zero_pulse": 2400,
+      "min_pulse": 500,
+      "max_pulse_limit": 2500
     },
     "slot_2": {
       "channel": 7,
-      "min": 107.67857142857143,
+      "min": 107.6,
       "max": 270.0,
       "min_pos": "bottom",
       "initial": 270.0,
@@ -109,7 +137,11 @@
       "actuation_range": 270,
       "pulse_min": 500,
       "pulse_max": 2500,
-      "device_name": "DS3225"
+      "device_name": "DS3225",
+      "initial_pulse": 2500,
+      "zero_pulse": 2500,
+      "min_pulse": 1297,
+      "max_pulse_limit": 2500
     },
     "slot_3": {
       "channel": 8,
@@ -122,7 +154,11 @@
       "actuation_range": 270,
       "pulse_min": 500,
       "pulse_max": 2500,
-      "device_name": "DS3225"
+      "device_name": "DS3225",
+      "initial_pulse": 2500,
+      "zero_pulse": 2500,
+      "min_pulse": 500,
+      "max_pulse_limit": 2500
     },
     "slot_4": {
       "channel": 9,
@@ -130,13 +166,17 @@
       "max": 180.0,
       "type": "horizontal",
       "min_pos": "left",
-      "initial": 88.9,
+      "initial": 88.8,
       "length": 65.0,
-      "zero_offset": 88.9,
+      "zero_offset": 88.8,
       "actuation_range": 180,
       "pulse_min": 500,
       "pulse_max": 2500,
-      "device_name": "DS3225"
+      "device_name": "DS3225",
+      "initial_pulse": 1487,
+      "zero_pulse": 1487,
+      "min_pulse": 500,
+      "max_pulse_limit": 2500
     },
     "slot_5": {
       "channel": 10,
@@ -150,21 +190,29 @@
       "actuation_range": 180,
       "pulse_min": 500,
       "pulse_max": 2500,
-      "device_name": "MG996R"
+      "device_name": "MG996R",
+      "initial_pulse": 1500,
+      "zero_pulse": 1500,
+      "min_pulse": 500,
+      "max_pulse_limit": 2500
     },
     "slot_6": {
       "channel": 11,
-      "min": 126.42857142857142,
+      "min": 126.4,
       "max": 180.0,
       "type": "gripper",
       "min_pos": "open",
-      "initial": 126.42857142857142,
+      "initial": 126.4,
       "length": 70.0,
-      "zero_offset": 126.42857142857142,
+      "zero_offset": 126.4,
       "actuation_range": 180,
       "pulse_min": 500,
       "pulse_max": 2500,
-      "device_name": "MG996R"
+      "device_name": "MG996R",
+      "initial_pulse": 1904,
+      "zero_pulse": 1904,
+      "min_pulse": 1904,
+      "max_pulse_limit": 2500
     }
   },
   "connection": {

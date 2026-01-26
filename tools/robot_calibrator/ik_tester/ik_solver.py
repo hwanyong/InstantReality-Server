@@ -49,6 +49,10 @@ class IKResult:
     is_reachable: bool = False
     error_message: str = ""
     
+    # Clamping info
+    was_clamped: bool = False
+    clamped_target: Tuple[float, float, float] = (0.0, 0.0, 0.0)
+    
     def get_valid_solutions(self) -> List[IKSolution]:
         return [s for s in self.solutions if s.is_valid]
     
@@ -72,9 +76,54 @@ class IKSolver:
         self.d1 = link_lengths.get('d1', 107.0)  # Base height
         self.a2 = link_lengths.get('a2', 105.0)  # Upper arm
         self.a3 = link_lengths.get('a3', 150.0)  # Forearm
-        self.a4 = link_lengths.get('a4', 65.0)   # Gripper
+        self.a4 = link_lengths.get('a4', 135.0)  # Hand (Wrist + Gripper)
+        
+        # Derived constant for cylindrical clamping
+        self.R_ARM = self.a2 + self.a3  # Max arm reach (255.0 mm)
         
         self.limits = joint_limits
+    
+    def clamp_target_to_cylinder(self, x, y, z, wrist_angle=0.0):
+        """
+        Dynamic Cylindrical Clamping: Preserves Z-height while clamping X/Y to
+        the maximum reachable radius at that height.
+        
+        Args:
+            x, y, z: Target coordinates in mm
+            wrist_angle: Wrist angle in degrees (affects effective reach)
+        
+        Returns:
+            (x_clamped, y_clamped, z, was_clamped, error_msg)
+        """
+        L_BASE = self.d1
+        R_ARM = self.R_ARM
+        L_HAND = self.a4
+        
+        # 1. Calculate relative height from shoulder
+        h = z - L_BASE
+        
+        # 2. Check vertical reachability
+        if abs(h) > R_ARM:
+            return x, y, z, False, f"Height unreachable: |h|={abs(h):.1f} > R_ARM={R_ARM}"
+        
+        # 3. Calculate arm's horizontal projection at height h
+        R_arm_proj = math.sqrt(R_ARM**2 - h**2)
+        
+        # 4. Calculate effective hand length (wrist angle in degrees)
+        L_eff = L_HAND * math.cos(math.radians(wrist_angle))
+        
+        # 5. Calculate max reachable radius
+        R_limit = R_arm_proj + L_eff
+        
+        # 6. Calculate current request distance
+        d = math.sqrt(x**2 + y**2)
+        
+        # 7. Apply clamping if exceeded
+        if d > R_limit and d > 0:
+            scale = R_limit / d
+            return x * scale, y * scale, z, True, None
+        
+        return x, y, z, False, None
     
     def solve(self, target_xyz: Tuple[float, float, float], 
               gripper_direction: Optional[float] = None) -> IKResult:
@@ -91,6 +140,20 @@ class IKSolver:
         """
         X, Y, Z = target_xyz
         result = IKResult(target=target_xyz)
+        
+        # Dynamic Cylindrical Clamping - DISABLED
+        # To re-enable, uncomment the following lines:
+        # wrist_angle = gripper_direction if gripper_direction else 0.0
+        # X, Y, Z, was_clamped, clamp_error = self.clamp_target_to_cylinder(X, Y, Z, wrist_angle)
+        # if clamp_error:
+        #     result.error_message = clamp_error
+        #     result.is_reachable = False
+        #     return result
+        
+        # Bypass: No clamping applied
+        was_clamped = False
+        result.was_clamped = was_clamped
+        result.clamped_target = (X, Y, Z)
         
         # Calculate all possible θ1 candidates
         # θ1 is the base yaw angle
