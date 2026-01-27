@@ -3,14 +3,14 @@ import tkinter as tk
 from tkinter import ttk
 import math
 from ..core import BaseTabController
-from ..widgets import TopDownWidget, SideElevation3LinkWidget
+from ..widgets import TopDownWidget, SideElevation4LinkWidget
 
 
 class FullSlotTab(BaseTabController):
     """
-    Tab 5: Full Slot (Gripper X) - Copy of TripleViewTab.
+    Tab 4: Full Slot (Gripper X) - 4-DOF arm control.
     - Top View: X/Y sliders, θ1 auto-calculated
-    - Side View: θ2/θ3 via IK, 3-Link FK rendering
+    - Side View: θ2/θ3 via IK, θ4 approach angle, 4-Link FK rendering
     """
     
     # Range constants (same as DualViewTab)
@@ -116,8 +116,8 @@ class FullSlotTab(BaseTabController):
         self.side_canvas = tk.Canvas(grid, width=240, height=240, bg="#1a2e1a")
         self.side_canvas.grid(row=0, column=1)
         
-        # 3-Link Widget
-        self.side_widget = SideElevation3LinkWidget(self.side_canvas, {
+        # 4-Link Widget (includes Slot 4 wrist rendering)
+        self.side_widget = SideElevation4LinkWidget(self.side_canvas, {
             'canvas_size': 240
         })
         
@@ -156,6 +156,19 @@ class FullSlotTab(BaseTabController):
         
         self.lbl_config_s3 = ttk.Label(s3_frame, text="--", font=("Consolas", 8), justify=tk.LEFT)
         self.lbl_config_s3.pack(anchor="w", fill=tk.X)
+        
+        # Slot 4 State + Config (Wrist - approach angle auto-calculated)
+        s4_frame = ttk.Labelframe(grid, text="Slot 4 (Wrist)", padding=5)
+        s4_frame.grid(row=4, column=0, columnspan=3, sticky="ew", pady=(5, 0))
+        
+        self.lbl_theta4 = ttk.Label(s4_frame, text="θ4: 0.0° (auto)", font=("Consolas", 10))
+        self.lbl_theta4.pack(anchor="w")
+        
+        self.lbl_pulse4 = ttk.Label(s4_frame, text="Pulse: --", font=("Consolas", 9))
+        self.lbl_pulse4.pack(anchor="w")
+        
+        self.lbl_config_s4 = ttk.Label(s4_frame, text="--", font=("Consolas", 8), justify=tk.LEFT)
+        self.lbl_config_s4.pack(anchor="w", fill=tk.X)
     
     def _create_info_panel(self, parent):
         """Create info/status panel."""
@@ -166,17 +179,17 @@ class FullSlotTab(BaseTabController):
 
 Top View:
 • X/Y sliders → θ1 auto
-• Config binding: ON
 
 Side View:
 • θ2/θ3 via IK
-• Config binding: ON
-• 3-Link FK rendering
+• θ4 = -90-(θ2+θ3) [approach]
+• 4-Link FK rendering
 
-[ Link Lengths from Config ]
-• d1 = Slot 1 length
-• a2 = Slot 2 length
-• a3 = Slot 3 length
+[ Link Lengths ]
+• d1 = Slot 1 (base)
+• a2 = Slot 2 (shoulder)
+• a3 = Slot 3 (elbow)
+• a4 = Slot 4 (wrist)
 """
         ttk.Label(frame, text=info_text, font=("Consolas", 9), justify=tk.LEFT).pack(anchor="nw")
     
@@ -196,17 +209,18 @@ Side View:
         self.update_visualization()
     
     def _refresh_config(self):
-        """Load Slot 1/2/3 config and update widgets."""
+        """Load Slot 1/2/3/4 config and update widgets."""
         p1 = self.context.get_slot_params(1)
         p2 = self.context.get_slot_params(2)
         p3 = self.context.get_slot_params(3)
+        p4 = self.context.get_slot_params(4)
         
         # Slot 1 (Top View)
         if p1:
             self.top_widget.cfg.update(p1)
             self.p1 = p1
         
-        # Slot 2/3 lengths -> Side View Widget
+        # Slot 2/3/4 lengths -> Side View Widget
         if p1:
             self.side_widget.cfg['d1'] = p1.get('length', 107.0)
         if p2:
@@ -217,6 +231,10 @@ Side View:
             self.side_widget.cfg['a3'] = p3.get('length', 150.0)
             self.side_widget.cfg['slot3_params'] = p3  # For Arc rendering
             self.p3 = p3
+        if p4:
+            self.side_widget.cfg['a4'] = p4.get('length', 65.0)
+            self.side_widget.cfg['slot4_params'] = p4  # For Arc rendering
+            self.p4 = p4
         
         # Update Slot 1 Config display
         arm = self.context.get_current_arm()
@@ -234,6 +252,11 @@ Side View:
         s3_data = raw_cfg.get("slot_3", {})
         lines3 = [f"{k}: {v}" for k, v in s3_data.items()]
         self.lbl_config_s3.config(text="\n".join(lines3) if lines3 else "--")
+        
+        # Update Slot 4 Config display
+        s4_data = raw_cfg.get("slot_4", {})
+        lines4 = [f"{k}: {v}" for k, v in s4_data.items()]
+        self.lbl_config_s4.config(text="\n".join(lines4) if lines4 else "--")
     
     def update_visualization(self):
         """Update visualizations based on IK calculation."""
@@ -249,14 +272,19 @@ Side View:
         d1 = getattr(self, 'p1', {}).get('length', 107.0) if hasattr(self, 'p1') else 107.0
         a2 = getattr(self, 'p2', {}).get('length', 105.0) if hasattr(self, 'p2') else 105.0
         a3 = getattr(self, 'p3', {}).get('length', 150.0) if hasattr(self, 'p3') else 150.0
+        a4 = getattr(self, 'p4', {}).get('length', 65.0) if hasattr(self, 'p4') else 65.0
         
-        # --- 2-Link IK Calculation (Multi-solution) ---
-        theta2, theta3, is_reachable, config_name = self._solve_2link_ik(R, z, d1, a2, a3)
+        # --- 4-Link IK: Gripper approaches Target at 90° ---
+        # Calculate virtual Wrist position (Wrist is a4 above target when gripper points down)
+        wrist_z = z + a4
+        
+        # 2-Link IK with Wrist position as target
+        theta2, theta3, is_reachable, config_name = self._solve_2link_ik(R, wrist_z, d1, a2, a3)
         
         # Invert θ3 for Slot 3 (min_pos: top)
         theta3 = -theta3
         
-        # Update Target Label with configuration
+        # Update Target Label with configuration (show original z, not wrist_z)
         self.lbl_target.config(text=f"Target: R={R:.1f} Z={z:.1f} [{config_name}]")
         
         # --- Slot 1 Real-time State ---
@@ -320,6 +348,32 @@ Side View:
         self.lbl_theta3.config(text=f"θ3: {theta3:.1f} (IK) | {phy_angle_s3:.1f} (Phy)")
         self.lbl_pulse3.config(text=f"Pulse: {pulse_calc_s3}")
         
+        # --- Slot 4 Real-time State (Approach Angle Auto-calculated) ---
+        # θ4 = -90 - (θ2 - θ3) to keep gripper perpendicular to ground
+        # Note: θ3 is relative angle, global_theta3 = θ2 - θ3
+        # When global_theta4 = -90° (pointing down): -90 = (θ2 - θ3) + θ4
+        theta4 = -90.0 - theta2 + theta3
+        pulse_calc_s4 = "--"
+        phy_angle_s4 = theta4
+        valid4 = False
+        
+        if hasattr(self, 'p4'):
+            mapper = self.context.mapper
+            zero_offset4 = self.p4.get('zero_offset', 0)
+            act_range4 = self.p4.get('actuation_range', 180)
+            
+            # min_pos: top → phy = zero + theta
+            phy_angle_s4 = zero_offset4 + theta4
+            phy_angle_s4 = max(0, min(act_range4, phy_angle_s4))
+            
+            pulse_val_s4 = mapper.physical_to_pulse(phy_angle_s4, self.p4['motor_config'])
+            pulse_calc_s4 = f"{pulse_val_s4}"
+            
+            valid4 = self.p4['math_min'] <= theta4 <= self.p4['math_max']
+        
+        self.lbl_theta4.config(text=f"θ4: {theta4:.1f} (auto) | {phy_angle_s4:.1f} (Phy)")
+        self.lbl_pulse4.config(text=f"Pulse: {pulse_calc_s4}")
+        
         # --- Warning ---
         warnings = []
         if not is_reachable:
@@ -328,6 +382,8 @@ Side View:
             warnings.append("θ2 out of range")
         if not valid3:
             warnings.append("θ3 out of range")
+        if not valid4:
+            warnings.append("θ4 out of range")
         self.lbl_warning.config(text="⚠️ " + ", ".join(warnings) if warnings else "")
         
         # --- Update Top View ---
@@ -336,12 +392,13 @@ Side View:
             valid1 = self.p1['math_min'] <= theta1 <= self.p1['math_max']
         self.top_widget.update_target(x, y, valid1)
         
-        # --- Update Side View with IK result ---
-        self.side_widget.update_target(theta2, theta3, R, z)
+        # --- Update Side View with IK result (4-link with R,Z target) ---
+        self.side_widget.update_target(theta2, theta3, theta4, R, z)
         
         # Store calculated angles for send_command
         self._ik_theta2 = theta2
         self._ik_theta3 = theta3
+        self._ik_theta4 = theta4
     
     def _solve_2link_ik(self, R, z, d1, a2, a3):
         """
@@ -418,8 +475,8 @@ Side View:
         return True
     
     def send_command(self, duration):
-        """Send command - All 3 slots using IK-calculated angles."""
-        if not all(hasattr(self, k) for k in ['p1', 'p2', 'p3']):
+        """Send command - All 4 slots using IK-calculated angles."""
+        if not all(hasattr(self, k) for k in ['p1', 'p2', 'p3', 'p4']):
             self.log("[FullSlot] Config not fully loaded, cannot send.")
             return
         
@@ -430,6 +487,7 @@ Side View:
         # Use IK-calculated angles
         theta2 = getattr(self, '_ik_theta2', 0.0)
         theta3 = getattr(self, '_ik_theta3', 0.0)
+        theta4 = getattr(self, '_ik_theta4', 0.0)
         
         mapper = self.context.mapper
         
@@ -449,13 +507,21 @@ Side View:
         phy3 = max(0, min(self.p3.get('actuation_range', 270), phy3))
         pls3 = mapper.physical_to_pulse(phy3, self.p3['motor_config'])
         
+        # Slot 4 (min_pos: top → phy = zero + theta)
+        zero_off4 = self.p4.get('zero_offset', 0)
+        phy4 = zero_off4 + theta4
+        phy4 = max(0, min(self.p4.get('actuation_range', 180), phy4))
+        pls4 = mapper.physical_to_pulse(phy4, self.p4['motor_config'])
+        
         targets = [
             (self.p1['channel'], pls1),
             (self.p2['channel'], pls2),
             (self.p3['channel'], pls3),
+            (self.p4['channel'], pls4),
         ]
         self.context.motion_planner.move_all(targets, duration)
         self.log(f"[FullSlot] Sent Ch{self.p1['channel']}:{pls1} (θ1={theta1:.1f}°)")
         self.log(f"[FullSlot] Sent Ch{self.p2['channel']}:{pls2} (θ2={theta2:.1f}° IK, Phy={phy2:.1f}°)")
         self.log(f"[FullSlot] Sent Ch{self.p3['channel']}:{pls3} (θ3={theta3:.1f}° IK, Phy={phy3:.1f}°)")
+        self.log(f"[FullSlot] Sent Ch{self.p4['channel']}:{pls4} (θ4={theta4:.1f}° auto, Phy={phy4:.1f}°)")
 

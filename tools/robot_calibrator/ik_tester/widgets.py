@@ -515,81 +515,219 @@ class SideElevation4LinkWidget(VisualWidget):
         return self._get_base_cy() - self._get_d1()
     
     def draw_static(self):
-        """Draw static elements: grid, ground, base."""
+        """Draw static elements: grid, ground, base, Slot 2 Arc."""
         self.canvas.delete("static")
-        size = self.cfg.get('canvas_size', 180)
+        size = self.cfg.get('canvas_size', 240)
         
         # Grid
-        for i in range(0, size + 1, 30):
+        for i in range(0, size + 1, 40):
             self.canvas.create_line(i, 0, i, size, fill="#333", dash=(2, 4), tags="static")
             self.canvas.create_line(0, i, size, i, fill="#333", dash=(2, 4), tags="static")
         
         base_cy = self._get_base_cy()
         shoulder_cy = self._get_shoulder_cy()
+        shoulder_cx = self.cx
         
-        # Ground
+        # Ground line
         self.canvas.create_line(0, base_cy, size, base_cy, fill="#665544", width=2, tags="static")
         
-        # Base tower
+        # --- Slot 2 Arc (Shoulder) - Blue ---
+        s2 = self.cfg.get('slot2_params', {})
+        if s2:
+            radius = self._get_a2()
+            offset = get_tkinter_offset(s2.get('type', 'vertical'), s2.get('min_pos', 'bottom'))
+            polarity = s2.get('polarity', 1)
+            zero_offset = s2.get('zero_offset', 0)
+            
+            # Background Arc (full range)
+            math_start = (0 - zero_offset) * polarity
+            math_end = (s2.get('actuation_range', 180) - zero_offset) * polarity
+            arc_start = min(math_start, math_end)
+            arc_extent = abs(math_end - math_start)
+            
+            self.canvas.create_arc(shoulder_cx-radius, shoulder_cy-radius,
+                                   shoulder_cx+radius, shoulder_cy+radius,
+                                   start=arc_start + offset, extent=arc_extent,
+                                   fill="", outline="#2266aa", width=1,
+                                   style=tk.ARC, tags="static")
+            
+            # Foreground Arc (valid range)
+            math_min = s2.get('math_min', -90)
+            math_max = s2.get('math_max', 90)
+            extent = math_max - math_min
+            
+            self.canvas.create_arc(shoulder_cx-radius, shoulder_cy-radius,
+                                   shoulder_cx+radius, shoulder_cy+radius,
+                                   start=math_min + offset, extent=extent,
+                                   fill="", outline="#44aaff", width=2,
+                                   style=tk.ARC, tags="static")
+        
+        # Base tower (d1)
         self.canvas.create_line(self.cx, base_cy, self.cx, shoulder_cy,
-                               fill="#4488ff", width=3, tags="static")
+                               fill="#4488ff", width=4, tags="static")
         
         # Base joint
-        self.canvas.create_oval(self.cx-3, base_cy-3, self.cx+3, base_cy+3,
+        self.canvas.create_oval(self.cx-4, base_cy-4, self.cx+4, base_cy+4,
                                fill="#fff", outline="#888", tags="static")
         
         # Shoulder joint
-        self.canvas.create_oval(self.cx-4, shoulder_cy-4, self.cx+4, shoulder_cy+4,
+        self.canvas.create_oval(self.cx-5, shoulder_cy-5, self.cx+5, shoulder_cy+5,
                                fill="#88aaff", outline="#fff", width=2, tags="static")
     
-    def update_target(self, theta2, theta3, theta4):
-        """Draw 4-link arm based on angles. θ4 is projected (X-Y rotation in R-Z view)."""
+    def update_target(self, theta2, theta3, theta4, R=None, Z=None):
+        """
+        Draw 4-link arm based on angles with full monitoring features.
+        Args:
+            theta2: Shoulder angle (deg)
+            theta3: Elbow angle (deg, relative)
+            theta4: Wrist angle (deg, approach angle)
+            R: Optional target radius for IK visualization
+            Z: Optional target height for IK visualization
+        """
         self.canvas.delete("dynamic")
         
         shoulder_cx = self.cx
         shoulder_cy = self._get_shoulder_cy()
+        base_cy = self._get_base_cy()
+        d1 = self.cfg.get('d1', self.DEFAULT_D1)
+        scale = self._get_scale()
         
-        # Link 1: Shoulder -> Elbow
+        # --- Target Point and Guidelines (IK mode) ---
+        if R is not None and Z is not None:
+            target_rx = shoulder_cx + R * scale
+            target_z_cy = shoulder_cy - (Z - d1) * scale
+            
+            # R Guideline (Vertical dashed line - green)
+            self.canvas.create_line(target_rx, base_cy, target_rx, target_z_cy,
+                                   fill="#88ff88", dash=(4, 4), width=1, tags="dynamic")
+            
+            # Z Guideline (Horizontal dashed line - orange)
+            self.canvas.create_line(shoulder_cx, target_z_cy, target_rx, target_z_cy,
+                                   fill="#ffaa44", dash=(4, 4), width=1, tags="dynamic")
+            
+            # Target Point (Red dot)
+            self.canvas.create_oval(target_rx-5, target_z_cy-5, target_rx+5, target_z_cy+5,
+                                   fill="#ff6666", outline="#fff", width=2, tags="dynamic")
+        
+        # --- Link 1: Shoulder -> Elbow (a2) ---
         a2_px = self._get_a2()
         theta2_rad = math.radians(theta2)
         elbow_cx = shoulder_cx + a2_px * math.cos(theta2_rad)
         elbow_cy = shoulder_cy - a2_px * math.sin(theta2_rad)
         
+        # --- Slot 3 Arc (Elbow - Dynamic, rotates with θ2) ---
+        s3 = self.cfg.get('slot3_params', {})
+        if s3:
+            a3_px = self._get_a3()
+            offset = get_tkinter_offset(s3.get('type', 'vertical'), s3.get('min_pos', 'top'))
+            polarity = s3.get('polarity', 1)
+            zero_offset = s3.get('zero_offset', 0)
+            
+            math_start = (0 - zero_offset) * polarity
+            math_end = (s3.get('actuation_range', 180) - zero_offset) * polarity
+            arc_start = min(math_start, math_end)
+            arc_extent = abs(math_end - math_start)
+            arc_rotation = theta2  # Arc rotates with shoulder
+            
+            # Background Arc (Orange - dim)
+            self.canvas.create_arc(elbow_cx-a3_px, elbow_cy-a3_px,
+                                   elbow_cx+a3_px, elbow_cy+a3_px,
+                                   start=arc_start + offset + arc_rotation, extent=arc_extent,
+                                   fill="", outline="#aa6622", width=1,
+                                   style=tk.ARC, tags="dynamic")
+            
+            # Foreground Arc (Orange - bright, valid range)
+            math_min = s3.get('math_min', -90)
+            math_max = s3.get('math_max', 90)
+            extent = math_max - math_min
+            
+            self.canvas.create_arc(elbow_cx-a3_px, elbow_cy-a3_px,
+                                   elbow_cx+a3_px, elbow_cy+a3_px,
+                                   start=math_min + offset + arc_rotation, extent=extent,
+                                   fill="", outline="#ffaa44", width=2,
+                                   style=tk.ARC, tags="dynamic")
+        
+        # Draw upper arm (Shoulder -> Elbow)
         self.canvas.create_line(shoulder_cx, shoulder_cy, elbow_cx, elbow_cy,
-                               fill="#44ff88", width=3, tags="dynamic")
-        self.canvas.create_oval(elbow_cx-3, elbow_cy-3, elbow_cx+3, elbow_cy+3,
+                               fill="#44ff88", width=4, tags="dynamic")
+        
+        # Elbow joint
+        self.canvas.create_oval(elbow_cx-4, elbow_cy-4, elbow_cx+4, elbow_cy+4,
                                fill="#ffaa44", outline="#fff", width=2, tags="dynamic")
         
-        # Link 2: Elbow -> Wrist
+        # --- Link 2: Elbow -> Wrist (a3) ---
         a3_px = self._get_a3()
         global_theta3 = theta2 - theta3
         theta3_rad = math.radians(global_theta3)
         wrist_cx = elbow_cx + a3_px * math.cos(theta3_rad)
         wrist_cy = elbow_cy - a3_px * math.sin(theta3_rad)
         
+        # --- Slot 4 Arc (Wrist - Dynamic, rotates with global_theta3) ---
+        s4 = self.cfg.get('slot4_params', {})
+        if s4:
+            a4_px = self._get_a4()
+            offset = get_tkinter_offset(s4.get('type', 'vertical'), s4.get('min_pos', 'top'))
+            polarity = s4.get('polarity', 1)
+            zero_offset = s4.get('zero_offset', 0)
+            
+            math_start = (0 - zero_offset) * polarity
+            math_end = (s4.get('actuation_range', 180) - zero_offset) * polarity
+            arc_start = min(math_start, math_end)
+            arc_extent = abs(math_end - math_start)
+            arc_rotation = global_theta3  # Arc rotates with forearm
+            
+            # Background Arc (Pink - dim)
+            self.canvas.create_arc(wrist_cx-a4_px, wrist_cy-a4_px,
+                                   wrist_cx+a4_px, wrist_cy+a4_px,
+                                   start=arc_start + offset + arc_rotation, extent=arc_extent,
+                                   fill="", outline="#aa22aa", width=1,
+                                   style=tk.ARC, tags="dynamic")
+            
+            # Foreground Arc (Pink - bright, valid range)
+            math_min = s4.get('math_min', -90)
+            math_max = s4.get('math_max', 90)
+            extent = math_max - math_min
+            
+            self.canvas.create_arc(wrist_cx-a4_px, wrist_cy-a4_px,
+                                   wrist_cx+a4_px, wrist_cy+a4_px,
+                                   start=math_min + offset + arc_rotation, extent=extent,
+                                   fill="", outline="#ff44ff", width=2,
+                                   style=tk.ARC, tags="dynamic")
+        
+        # Draw forearm (Elbow -> Wrist)
         self.canvas.create_line(elbow_cx, elbow_cy, wrist_cx, wrist_cy,
-                               fill="#88ff44", width=2, tags="dynamic")
-        self.canvas.create_oval(wrist_cx-3, wrist_cy-3, wrist_cx+3, wrist_cy+3,
+                               fill="#88ff44", width=3, tags="dynamic")
+        
+        # Wrist joint
+        self.canvas.create_oval(wrist_cx-4, wrist_cy-4, wrist_cx+4, wrist_cy+4,
                                fill="#ff6666", outline="#fff", width=2, tags="dynamic")
         
-        # Link 3: Wrist -> Gripper (θ4 is X-Y rotation, so project to R-Z)
-        # In side view (R-Z plane), θ4 rotation appears as length scaling
+        # --- Link 3: Wrist -> Gripper (a4) ---
         a4_px = self._get_a4()
-        a4_projected = a4_px * math.cos(math.radians(theta4))  # Projection
+        global_theta4 = global_theta3 + theta4  # Absolute angle in R-Z plane
+        theta4_rad = math.radians(global_theta4)
         
-        # Gripper extends in same direction as wrist (global_theta3)
-        gripper_cx = wrist_cx + a4_projected * math.cos(theta3_rad)
-        gripper_cy = wrist_cy - a4_projected * math.sin(theta3_rad)
+        gripper_cx = wrist_cx + a4_px * math.cos(theta4_rad)
+        gripper_cy = wrist_cy - a4_px * math.sin(theta4_rad)
         
+        # Draw gripper link (Wrist -> Gripper)
         self.canvas.create_line(wrist_cx, wrist_cy, gripper_cx, gripper_cy,
                                fill="#ff88ff", width=2, tags="dynamic")
-        self.canvas.create_oval(gripper_cx-3, gripper_cy-3, gripper_cx+3, gripper_cy+3,
+        
+        # Gripper end point
+        self.canvas.create_oval(gripper_cx-4, gripper_cy-4, gripper_cx+4, gripper_cy+4,
                                fill="#ff44ff", outline="#fff", width=2, tags="dynamic")
         
-        # Angle label
-        self.canvas.create_text(5, 5, anchor="nw", fill="#ffaaff",
-                               font=("Consolas", 8),
-                               text=f"θ4: {theta4:.1f}° (proj)", tags="dynamic")
+        # --- Angle labels ---
+        self.canvas.create_text(10, 15, anchor="nw", fill="#aaffaa",
+                               font=("Consolas", 9),
+                               text=f"θ2: {theta2:.1f}°", tags="dynamic")
+        self.canvas.create_text(10, 30, anchor="nw", fill="#ffffaa",
+                               font=("Consolas", 9),
+                               text=f"θ3: {theta3:.1f}° (rel)", tags="dynamic")
+        self.canvas.create_text(10, 45, anchor="nw", fill="#ffaaff",
+                               font=("Consolas", 9),
+                               text=f"θ4: {theta4:.1f}° → G: {global_theta4:.1f}°", tags="dynamic")
 
 
 class WristPitchGaugeWidget(VisualWidget):
