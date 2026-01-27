@@ -486,6 +486,7 @@ class SideElevation4LinkWidget(VisualWidget):
     DEFAULT_A2 = 105.0
     DEFAULT_A3 = 150.0
     DEFAULT_A4 = 65.0
+    DEFAULT_A6 = 70.0  # Gripper length
     DEFAULT_SCALE = 0.35
     
     def __init__(self, canvas, config=None):
@@ -507,6 +508,9 @@ class SideElevation4LinkWidget(VisualWidget):
     
     def _get_a4(self):
         return self.cfg.get('a4', self.DEFAULT_A4) * self._get_scale()
+    
+    def _get_a6(self):
+        return self.cfg.get('a6', self.DEFAULT_A6) * self._get_scale()
     
     def _get_base_cy(self):
         return self.cfg.get('canvas_size', 180) - 20
@@ -710,13 +714,28 @@ class SideElevation4LinkWidget(VisualWidget):
         gripper_cx = wrist_cx + a4_px * math.cos(theta4_rad)
         gripper_cy = wrist_cy - a4_px * math.sin(theta4_rad)
         
-        # Draw gripper link (Wrist -> Gripper)
+        # Draw wrist link (Wrist -> Wrist End)
         self.canvas.create_line(wrist_cx, wrist_cy, gripper_cx, gripper_cy,
                                fill="#ff88ff", width=2, tags="dynamic")
         
-        # Gripper end point
-        self.canvas.create_oval(gripper_cx-4, gripper_cy-4, gripper_cx+4, gripper_cy+4,
-                               fill="#ff44ff", outline="#fff", width=2, tags="dynamic")
+        # Wrist end joint
+        self.canvas.create_oval(gripper_cx-3, gripper_cy-3, gripper_cx+3, gripper_cy+3,
+                               fill="#ff44ff", outline="#fff", width=1, tags="dynamic")
+        
+        # --- Link 4: Gripper Extension (a6) ---
+        a6_px = self._get_a6()
+        # Gripper extends in same direction as wrist (theta4)
+        gripper_tip_cx = gripper_cx + a6_px * math.cos(theta4_rad)
+        gripper_tip_cy = gripper_cy - a6_px * math.sin(theta4_rad)
+        
+        # Draw gripper link (Yellow)
+        self.canvas.create_line(gripper_cx, gripper_cy, gripper_tip_cx, gripper_tip_cy,
+                               fill="#ffff44", width=3, tags="dynamic")
+        
+        # Gripper Tip (Yellow dot = Target)
+        self.canvas.create_oval(gripper_tip_cx-5, gripper_tip_cy-5, 
+                               gripper_tip_cx+5, gripper_tip_cy+5,
+                               fill="#ffff00", outline="#fff", width=2, tags="dynamic")
         
         # --- Angle labels ---
         self.canvas.create_text(10, 15, anchor="nw", fill="#aaffaa",

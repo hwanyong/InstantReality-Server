@@ -25,6 +25,8 @@ class FullSlot2Tab(BaseTabController):
         self.x_var = tk.DoubleVar(value=0.0)
         self.y_var = tk.DoubleVar(value=200.0)
         self.z_var = tk.DoubleVar(value=150.0)  # Z Height for IK
+        self.roll_var = tk.DoubleVar(value=90.0)   # Slot 5 (Roll) - manual
+        self.gripper_var = tk.DoubleVar(value=0.0)  # Slot 6 (Gripper) - manual
         
         self.main_frame = ttk.Frame(self.parent)
         self.main_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
@@ -132,37 +134,65 @@ class FullSlot2Tab(BaseTabController):
         self.lbl_warning = ttk.Label(dyn_frame, text="", font=("Consolas", 9, "bold"), foreground="red")
         self.lbl_warning.pack(anchor="w")
         
-        # --- Compact Slot Status Row (2x2 grid under canvas) ---
+        # --- Compact Slot Status Row (horizontal grid under canvas) ---
         slots_frame = ttk.Frame(grid)
         slots_frame.grid(row=2, column=0, columnspan=3, sticky="ew", pady=(5, 0))
         
-        # Configure grid columns to expand evenly
-        for i in range(4):
+        # Configure grid columns to expand evenly (6 columns: S2-S6 + gripper)
+        for i in range(6):
             slots_frame.columnconfigure(i, weight=1)
         
         # Slot 2 (Shoulder) - Compact
-        s2_frame = ttk.LabelFrame(slots_frame, text="S2 (Shoulder)", padding=3)
-        s2_frame.grid(row=0, column=0, padx=2, pady=2, sticky="nsew")
-        self.lbl_theta2 = ttk.Label(s2_frame, text="θ: 0.0° | Phy: 0.0°", font=("Consolas", 8))
+        s2_frame = ttk.LabelFrame(slots_frame, text="S2", padding=2)
+        s2_frame.grid(row=0, column=0, padx=1, pady=1, sticky="nsew")
+        self.lbl_theta2 = ttk.Label(s2_frame, text="θ: 0.0°", font=("Consolas", 7))
         self.lbl_theta2.pack(anchor="w")
-        self.lbl_pulse2 = ttk.Label(s2_frame, text="Pulse: --", font=("Consolas", 8))
+        self.lbl_pulse2 = ttk.Label(s2_frame, text="P: --", font=("Consolas", 7))
         self.lbl_pulse2.pack(anchor="w")
         
         # Slot 3 (Elbow) - Compact
-        s3_frame = ttk.LabelFrame(slots_frame, text="S3 (Elbow)", padding=3)
-        s3_frame.grid(row=0, column=1, padx=2, pady=2, sticky="nsew")
-        self.lbl_theta3 = ttk.Label(s3_frame, text="θ: 0.0° | Phy: 0.0°", font=("Consolas", 8))
+        s3_frame = ttk.LabelFrame(slots_frame, text="S3", padding=2)
+        s3_frame.grid(row=0, column=1, padx=1, pady=1, sticky="nsew")
+        self.lbl_theta3 = ttk.Label(s3_frame, text="θ: 0.0°", font=("Consolas", 7))
         self.lbl_theta3.pack(anchor="w")
-        self.lbl_pulse3 = ttk.Label(s3_frame, text="Pulse: --", font=("Consolas", 8))
+        self.lbl_pulse3 = ttk.Label(s3_frame, text="P: --", font=("Consolas", 7))
         self.lbl_pulse3.pack(anchor="w")
         
-        # Slot 4 (Wrist) - Compact
-        s4_frame = ttk.LabelFrame(slots_frame, text="S4 (Wrist)", padding=3)
-        s4_frame.grid(row=0, column=2, padx=2, pady=2, sticky="nsew")
-        self.lbl_theta4 = ttk.Label(s4_frame, text="θ: 0.0° | Phy: 0.0°", font=("Consolas", 8))
+        # Slot 4 (Wrist Pitch) - Compact
+        s4_frame = ttk.LabelFrame(slots_frame, text="S4", padding=2)
+        s4_frame.grid(row=0, column=2, padx=1, pady=1, sticky="nsew")
+        self.lbl_theta4 = ttk.Label(s4_frame, text="θ: 0.0°", font=("Consolas", 7))
         self.lbl_theta4.pack(anchor="w")
-        self.lbl_pulse4 = ttk.Label(s4_frame, text="Pulse: --", font=("Consolas", 8))
+        self.lbl_pulse4 = ttk.Label(s4_frame, text="P: --", font=("Consolas", 7))
         self.lbl_pulse4.pack(anchor="w")
+        
+        # Slot 5 (Roll) - Manual Slider
+        s5_frame = ttk.LabelFrame(slots_frame, text="S5 Roll", padding=2)
+        s5_frame.grid(row=0, column=3, padx=1, pady=1, sticky="nsew")
+        self.roll_slider = ttk.Scale(
+            s5_frame, from_=0, to=180,
+            variable=self.roll_var, orient=tk.HORIZONTAL, length=60,
+            command=lambda v: self.update_visualization()
+        )
+        self.roll_slider.pack(fill=tk.X)
+        self.lbl_theta5 = ttk.Label(s5_frame, text="θ: 90.0°", font=("Consolas", 7))
+        self.lbl_theta5.pack(anchor="w")
+        self.lbl_pulse5 = ttk.Label(s5_frame, text="P: --", font=("Consolas", 7))
+        self.lbl_pulse5.pack(anchor="w")
+        
+        # Slot 6 (Gripper) - Manual Slider
+        s6_frame = ttk.LabelFrame(slots_frame, text="S6 Grip", padding=2)
+        s6_frame.grid(row=0, column=4, padx=1, pady=1, sticky="nsew")
+        self.gripper_slider = ttk.Scale(
+            s6_frame, from_=0, to=180,
+            variable=self.gripper_var, orient=tk.HORIZONTAL, length=60,
+            command=lambda v: self.update_visualization()
+        )
+        self.gripper_slider.pack(fill=tk.X)
+        self.lbl_theta6 = ttk.Label(s6_frame, text="θ: 0.0°", font=("Consolas", 7))
+        self.lbl_theta6.pack(anchor="w")
+        self.lbl_pulse6 = ttk.Label(s6_frame, text="P: --", font=("Consolas", 7))
+        self.lbl_pulse6.pack(anchor="w")
     
     def _create_info_panel(self, parent):
         """Create info/status panel."""
@@ -203,11 +233,13 @@ Side View:
         self.update_visualization()
     
     def _refresh_config(self):
-        """Load Slot 1/2/3/4 config and update widgets."""
+        """Load Slot 1-6 config and update widgets."""
         p1 = self.context.get_slot_params(1)
         p2 = self.context.get_slot_params(2)
         p3 = self.context.get_slot_params(3)
         p4 = self.context.get_slot_params(4)
+        p5 = self.context.get_slot_params(5)
+        p6 = self.context.get_slot_params(6)
         
         # Slot 1 (Top View)
         if p1:
@@ -229,6 +261,13 @@ Side View:
             self.side_widget.cfg['a4'] = p4.get('length', 65.0)
             self.side_widget.cfg['slot4_params'] = p4  # For Arc rendering
             self.p4 = p4
+        
+        # Slot 5 (Roll) and Slot 6 (Gripper)
+        if p5:
+            self.p5 = p5
+        if p6:
+            self.p6 = p6
+            self.side_widget.cfg['a6'] = p6.get('length', 70.0)  # For rendering
         
         # Update Slot 1 Config display
         arm = self.context.get_current_arm()
@@ -252,10 +291,11 @@ Side View:
         a2 = getattr(self, 'p2', {}).get('length', 105.0) if hasattr(self, 'p2') else 105.0
         a3 = getattr(self, 'p3', {}).get('length', 150.0) if hasattr(self, 'p3') else 150.0
         a4 = getattr(self, 'p4', {}).get('length', 65.0) if hasattr(self, 'p4') else 65.0
+        a6 = getattr(self, 'p6', {}).get('length', 70.0) if hasattr(self, 'p6') else 70.0
         
-        # --- 4-Link IK: Gripper approaches Target at 90° ---
-        # Calculate virtual Wrist position (Wrist is a4 above target when gripper points down)
-        wrist_z = z + a4
+        # --- 5-Link IK: Gripper TIP reaches Target at 90° ---
+        # Gripper points down (-90°), so wrist is (a4 + a6) above target
+        wrist_z = z + a4 + a6
         
         # 2-Link IK with Wrist position as target
         theta2, theta3, is_reachable, config_name = self._solve_2link_ik(R, wrist_z, d1, a2, a3)
@@ -350,20 +390,70 @@ Side View:
             
             valid4 = self.p4['math_min'] <= theta4 <= self.p4['math_max']
         
-        self.lbl_theta4.config(text=f"θ4: {theta4:.1f} (auto) | {phy_angle_s4:.1f} (Phy)")
-        self.lbl_pulse4.config(text=f"Pulse: {pulse_calc_s4}")
+        self.lbl_theta4.config(text=f"θ4: {theta4:.1f}°")
+        self.lbl_pulse4.config(text=f"P: {pulse_calc_s4}")
+        
+        # --- Slot 5 Real-time State (Roll - Manual Input) ---
+        theta5 = self.roll_var.get()
+        pulse_calc_s5 = "--"
+        phy_angle_s5 = theta5
+        valid5 = True
+        
+        if hasattr(self, 'p5'):
+            mapper = self.context.mapper
+            zero_offset5 = self.p5.get('zero_offset', 0)
+            act_range5 = self.p5.get('actuation_range', 180)
+            
+            # type: roll, min_pos: ccw → polarity based on config
+            phy_angle_s5 = theta5 + zero_offset5
+            phy_angle_s5 = max(0, min(act_range5, phy_angle_s5))
+            
+            pulse_val_s5 = mapper.physical_to_pulse(phy_angle_s5, self.p5['motor_config'])
+            pulse_calc_s5 = f"{pulse_val_s5}"
+            
+            valid5 = self.p5['math_min'] <= theta5 <= self.p5['math_max']
+        
+        self.lbl_theta5.config(text=f"θ: {theta5:.0f}°")
+        self.lbl_pulse5.config(text=f"P: {pulse_calc_s5}")
+        
+        # --- Slot 6 Real-time State (Gripper - Manual Input) ---
+        theta6 = self.gripper_var.get()
+        pulse_calc_s6 = "--"
+        phy_angle_s6 = theta6
+        valid6 = True
+        
+        if hasattr(self, 'p6'):
+            mapper = self.context.mapper
+            zero_offset6 = self.p6.get('zero_offset', 0)
+            act_range6 = self.p6.get('actuation_range', 180)
+            
+            # type: gripper, min_pos: open
+            phy_angle_s6 = theta6 + zero_offset6
+            phy_angle_s6 = max(0, min(act_range6, phy_angle_s6))
+            
+            pulse_val_s6 = mapper.physical_to_pulse(phy_angle_s6, self.p6['motor_config'])
+            pulse_calc_s6 = f"{pulse_val_s6}"
+            
+            valid6 = self.p6['math_min'] <= theta6 <= self.p6['math_max']
+        
+        self.lbl_theta6.config(text=f"θ: {theta6:.0f}°")
+        self.lbl_pulse6.config(text=f"P: {pulse_calc_s6}")
         
         # --- Warning ---
         warnings = []
         if not is_reachable:
             warnings.append(f"{config_name}")
         if not valid2:
-            warnings.append("θ2 out of range")
+            warnings.append("θ2")
         if not valid3:
-            warnings.append("θ3 out of range")
+            warnings.append("θ3")
         if not valid4:
-            warnings.append("θ4 out of range")
-        self.lbl_warning.config(text="⚠️ " + ", ".join(warnings) if warnings else "")
+            warnings.append("θ4")
+        if not valid5:
+            warnings.append("θ5")
+        if not valid6:
+            warnings.append("θ6")
+        self.lbl_warning.config(text="⚠️ Out: " + ", ".join(warnings) if warnings else "")
         
         # --- Update Top View ---
         valid1 = False
@@ -378,6 +468,8 @@ Side View:
         self._ik_theta2 = theta2
         self._ik_theta3 = theta3
         self._ik_theta4 = theta4
+        self._theta5 = theta5
+        self._theta6 = theta6
     
     def _solve_2link_ik(self, R, z, d1, a2, a3):
         """
@@ -454,19 +546,25 @@ Side View:
         return True
     
     def send_command(self, duration):
-        """Send command - All 4 slots using IK-calculated angles."""
-        if not all(hasattr(self, k) for k in ['p1', 'p2', 'p3', 'p4']):
-            self.log("[FullSlot] Config not fully loaded, cannot send.")
+        """Send command - All 6 slots using IK-calculated and manual angles."""
+        required = ['p1', 'p2', 'p3', 'p4', 'p5', 'p6']
+        missing = [k for k in required if not hasattr(self, k)]
+        if missing:
+            self.log(f"[FullSlot2] Config missing: {missing}, cannot send.")
             return
         
         x = self.x_var.get()
         y = self.y_var.get()
         theta1 = math.degrees(math.atan2(y, x)) if (x != 0 or y != 0) else 0
         
-        # Use IK-calculated angles
+        # Use IK-calculated angles (Slot 2-4)
         theta2 = getattr(self, '_ik_theta2', 0.0)
         theta3 = getattr(self, '_ik_theta3', 0.0)
         theta4 = getattr(self, '_ik_theta4', 0.0)
+        
+        # Manual angles (Slot 5-6)
+        theta5 = getattr(self, '_theta5', 90.0)
+        theta6 = getattr(self, '_theta6', 0.0)
         
         mapper = self.context.mapper
         
@@ -492,15 +590,25 @@ Side View:
         phy4 = max(0, min(self.p4.get('actuation_range', 180), phy4))
         pls4 = mapper.physical_to_pulse(phy4, self.p4['motor_config'])
         
+        # Slot 5 (Roll - manual)
+        zero_off5 = self.p5.get('zero_offset', 0)
+        phy5 = theta5 + zero_off5
+        phy5 = max(0, min(self.p5.get('actuation_range', 180), phy5))
+        pls5 = mapper.physical_to_pulse(phy5, self.p5['motor_config'])
+        
+        # Slot 6 (Gripper - manual)
+        zero_off6 = self.p6.get('zero_offset', 0)
+        phy6 = theta6 + zero_off6
+        phy6 = max(0, min(self.p6.get('actuation_range', 180), phy6))
+        pls6 = mapper.physical_to_pulse(phy6, self.p6['motor_config'])
+        
         targets = [
             (self.p1['channel'], pls1),
             (self.p2['channel'], pls2),
             (self.p3['channel'], pls3),
             (self.p4['channel'], pls4),
+            (self.p5['channel'], pls5),
+            (self.p6['channel'], pls6),
         ]
         self.context.motion_planner.move_all(targets, duration)
-        self.log(f"[FullSlot] Sent Ch{self.p1['channel']}:{pls1} (θ1={theta1:.1f}°)")
-        self.log(f"[FullSlot] Sent Ch{self.p2['channel']}:{pls2} (θ2={theta2:.1f}° IK, Phy={phy2:.1f}°)")
-        self.log(f"[FullSlot] Sent Ch{self.p3['channel']}:{pls3} (θ3={theta3:.1f}° IK, Phy={phy3:.1f}°)")
-        self.log(f"[FullSlot] Sent Ch{self.p4['channel']}:{pls4} (θ4={theta4:.1f}° auto, Phy={phy4:.1f}°)")
-
+        self.log(f"[FullSlot2] 6ch sent: Ch{self.p1['channel']}~{self.p6['channel']}")
