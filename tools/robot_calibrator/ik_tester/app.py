@@ -32,6 +32,7 @@ from .tabs.base import Slot1Tab
 from .tabs.dual_view import DualViewTab
 from .tabs.triple_view import TripleViewTab
 from .tabs.full_slot_view import FullSlotTab
+from .tabs.full_slot2_view import FullSlot2Tab
 
 # Thread Timing
 SENDER_LOOP_INTERVAL = 0.033
@@ -113,6 +114,11 @@ class IKTesterApp:
         t4_frame = ttk.Frame(self.notebook)
         self.notebook.add(t4_frame, text="Full Slot (Gripper X)")
         self.tabs.append(FullSlotTab(t4_frame, self))
+        
+        # Tab 5: Full Slot (Independent Copy)
+        t5_frame = ttk.Frame(self.notebook)
+        self.notebook.add(t5_frame, text="Full Slot")
+        self.tabs.append(FullSlot2Tab(t5_frame, self))
 
     def _create_styles(self):
         style = ttk.Style()

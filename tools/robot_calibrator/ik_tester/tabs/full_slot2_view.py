@@ -6,9 +6,10 @@ from ..core import BaseTabController
 from ..widgets import TopDownWidget, SideElevation4LinkWidget
 
 
-class FullSlotTab(BaseTabController):
+
+class FullSlot2Tab(BaseTabController):
     """
-    Tab 4: Full Slot (Gripper X) - 4-DOF arm control.
+    Tab 5: Full Slot - Independent copy of Tab 4 for customization.
     - Top View: X/Y sliders, θ1 auto-calculated
     - Side View: θ2/θ3 via IK, θ4 approach angle, 4-Link FK rendering
     """
