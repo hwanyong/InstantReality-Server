@@ -910,3 +910,124 @@ class TopDownWristWidget(VisualWidget):
         self.canvas.create_text(5, 15, anchor="nw", fill="#ffaaff",
                                font=("Consolas", 8),
                                text=f"θ4: {theta4:.1f}°", tags="dynamic")
+
+
+class GripperStateWidget(VisualWidget):
+    """
+    Widget for Gripper rotation (Roll θ5) and Open/Close (θ6) visualization.
+    Top-down view showing gripper fingers and rotation state.
+    """
+    
+    def __init__(self, canvas, config=None):
+        self.canvas = canvas
+        self.cfg = config or {'canvas_size': 120}
+        size = self.cfg.get('canvas_size', 120)
+        self.cx = size // 2
+        self.cy = size // 2
+        self.finger_length = 25
+        self.finger_width = 6
+    
+    def draw_static(self):
+        """Draw grid and center point."""
+        self.canvas.delete("static")
+        size = self.cfg.get('canvas_size', 120)
+        
+        # Background
+        self.canvas.create_rectangle(0, 0, size, size, fill="#1a1a2e", outline="", tags="static")
+        
+        # Grid
+        for i in range(0, size + 1, 30):
+            self.canvas.create_line(i, 0, i, size, fill="#333", dash=(2, 4), tags="static")
+            self.canvas.create_line(0, i, size, i, fill="#333", dash=(2, 4), tags="static")
+        
+        # Center cross
+        self.canvas.create_line(self.cx - 10, self.cy, self.cx + 10, self.cy,
+                               fill="#555", width=1, tags="static")
+        self.canvas.create_line(self.cx, self.cy - 10, self.cx, self.cy + 10,
+                               fill="#555", width=1, tags="static")
+    
+    def update_target(self, *args, **kwargs):
+        """Abstract method implementation - delegates to update()."""
+        if len(args) >= 2:
+            self.update(args[0], args[1])
+    
+    def update(self, roll_angle, gripper_angle):
+        """
+        Update gripper visualization.
+        Args:
+            roll_angle: Wrist roll angle (θ5) in degrees
+            gripper_angle: Gripper angle (θ6) in degrees (0=open, 180=closed)
+        """
+        self.canvas.delete("dynamic")
+        
+        # Convert angles to radians
+        roll_rad = math.radians(roll_angle)
+        
+        # Gripper opening: 0° = max open, ~55° = closed
+        max_opening = 20  # max finger separation (pixels)
+        min_opening = 2   # min finger separation when closed
+        # Map gripper angle to opening (0° = open, 55° = closed)
+        opening = max(min_opening, max_opening - (gripper_angle / 55.0) * (max_opening - min_opening))
+        
+        # Calculate finger positions based on roll angle
+        # Perpendicular to roll direction
+        perp_angle = roll_rad + math.pi / 2
+        
+        # Finger 1 (left when roll=0)
+        f1_start_x = self.cx + opening * math.cos(perp_angle)
+        f1_start_y = self.cy - opening * math.sin(perp_angle)
+        f1_end_x = f1_start_x + self.finger_length * math.cos(roll_rad)
+        f1_end_y = f1_start_y - self.finger_length * math.sin(roll_rad)
+        
+        # Finger 2 (right when roll=0)
+        f2_start_x = self.cx - opening * math.cos(perp_angle)
+        f2_start_y = self.cy + opening * math.sin(perp_angle)
+        f2_end_x = f2_start_x + self.finger_length * math.cos(roll_rad)
+        f2_end_y = f2_start_y - self.finger_length * math.sin(roll_rad)
+        
+        # Draw wrist mount (circle at center)
+        mount_r = 8
+        self.canvas.create_oval(self.cx - mount_r, self.cy - mount_r,
+                               self.cx + mount_r, self.cy + mount_r,
+                               fill="#444", outline="#666", width=2, tags="dynamic")
+        
+        # Draw fingers (yellow)
+        self.canvas.create_line(f1_start_x, f1_start_y, f1_end_x, f1_end_y,
+                               fill="#ffff44", width=self.finger_width, 
+                               capstyle=tk.ROUND, tags="dynamic")
+        self.canvas.create_line(f2_start_x, f2_start_y, f2_end_x, f2_end_y,
+                               fill="#ffff44", width=self.finger_width,
+                               capstyle=tk.ROUND, tags="dynamic")
+        
+        # Draw finger tips (slightly darker)
+        tip_r = 3
+        self.canvas.create_oval(f1_end_x - tip_r, f1_end_y - tip_r,
+                               f1_end_x + tip_r, f1_end_y + tip_r,
+                               fill="#cccc00", outline="", tags="dynamic")
+        self.canvas.create_oval(f2_end_x - tip_r, f2_end_y - tip_r,
+                               f2_end_x + tip_r, f2_end_y + tip_r,
+                               fill="#cccc00", outline="", tags="dynamic")
+        
+        # Draw roll direction indicator (arrow from center)
+        arrow_len = 35
+        arrow_x = self.cx + arrow_len * math.cos(roll_rad)
+        arrow_y = self.cy - arrow_len * math.sin(roll_rad)
+        self.canvas.create_line(self.cx, self.cy, arrow_x, arrow_y,
+                               fill="#88aaff", width=2, arrow=tk.LAST, tags="dynamic")
+        
+        # State label
+        state = "OPEN" if gripper_angle < 30 else "CLOSED" if gripper_angle > 50 else "PARTIAL"
+        state_color = "#44ff44" if state == "OPEN" else "#ff4444" if state == "CLOSED" else "#ffaa44"
+        
+        self.canvas.create_text(self.cx, self.cfg.get('canvas_size', 120) - 8,
+                               anchor="s", fill=state_color,
+                               font=("Consolas", 9, "bold"),
+                               text=state, tags="dynamic")
+        
+        # Angle labels
+        self.canvas.create_text(5, 5, anchor="nw", fill="#88aaff",
+                               font=("Consolas", 8),
+                               text=f"Roll: {roll_angle:.0f}°", tags="dynamic")
+        self.canvas.create_text(5, 15, anchor="nw", fill="#ffff44",
+                               font=("Consolas", 8),
+                               text=f"Grip: {gripper_angle:.0f}°", tags="dynamic")

@@ -3,7 +3,7 @@ import tkinter as tk
 from tkinter import ttk
 import math
 from ..core import BaseTabController
-from ..widgets import TopDownWidget, SideElevation4LinkWidget
+from ..widgets import TopDownWidget, SideElevation4LinkWidget, GripperStateWidget
 
 
 
@@ -195,33 +195,34 @@ class FullSlot2Tab(BaseTabController):
         self.lbl_pulse6.pack(anchor="w")
     
     def _create_info_panel(self, parent):
-        """Create info/status panel."""
-        frame = ttk.LabelFrame(parent, text="Status", padding=5)
+        """Create info/status panel with Gripper visualization."""
+        frame = ttk.LabelFrame(parent, text="Gripper State", padding=5)
         frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=2)
         
-        info_text = """[ Full Slot (Gripper X) ]
-
-Top View:
-• X/Y sliders → θ1 auto
-
-Side View:
-• θ2/θ3 via IK
-• θ4 = -90-(θ2+θ3) [approach]
-• 4-Link FK rendering
-
-[ Link Lengths ]
-• d1 = Slot 1 (base)
-• a2 = Slot 2 (shoulder)
-• a3 = Slot 3 (elbow)
-• a4 = Slot 4 (wrist)
-"""
-        ttk.Label(frame, text=info_text, font=("Consolas", 9), justify=tk.LEFT).pack(anchor="nw")
+        # Gripper Canvas (Top-Down View)
+        gripper_size = 120
+        self.gripper_canvas = tk.Canvas(frame, width=gripper_size, height=gripper_size,
+                                        bg="#1a1a2e", highlightthickness=1, highlightbackground="#444")
+        self.gripper_canvas.pack(pady=5)
+        
+        # Gripper Widget
+        self.gripper_widget = GripperStateWidget(self.gripper_canvas, {'canvas_size': gripper_size})
+        
+        # Info text (compact)
+        info_text = """[ 5-Link IK ]
+• θ1: Base Yaw
+• θ2-θ3: Position IK
+• θ4: Approach (-90°)
+• θ5: Roll (manual)
+• θ6: Gripper (manual)"""
+        ttk.Label(frame, text=info_text, font=("Consolas", 8), justify=tk.LEFT).pack(anchor="nw", pady=5)
     
     def on_enter(self):
         """Called when tab is selected."""
         self._refresh_config()
         self.top_widget.draw_static()
         self.side_widget.draw_static()
+        self.gripper_widget.draw_static()
         self.update_visualization()
     
     def on_config_updated(self):
@@ -461,8 +462,11 @@ Side View:
             valid1 = self.p1['math_min'] <= theta1 <= self.p1['math_max']
         self.top_widget.update_target(x, y, valid1)
         
-        # --- Update Side View with IK result (4-link with R,Z target) ---
+        # --- Update Side View with IK result (5-link with R,Z target) ---
         self.side_widget.update_target(theta2, theta3, theta4, R, z)
+        
+        # --- Update Gripper State View ---
+        self.gripper_widget.update(theta5, theta6)
         
         # Store calculated angles for send_command
         self._ik_theta2 = theta2
