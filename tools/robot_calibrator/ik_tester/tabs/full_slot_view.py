@@ -362,8 +362,8 @@ Side View:
             zero_offset4 = self.p4.get('zero_offset', 0)
             act_range4 = self.p4.get('actuation_range', 180)
             
-            # min_pos: top → phy = zero + theta
-            phy_angle_s4 = zero_offset4 + theta4
+            # min_pos: top → polarity = -1 → phy = zero - theta
+            phy_angle_s4 = zero_offset4 - theta4
             phy_angle_s4 = max(0, min(act_range4, phy_angle_s4))
             
             pulse_val_s4 = mapper.physical_to_pulse(phy_angle_s4, self.p4['motor_config'])
@@ -507,9 +507,9 @@ Side View:
         phy3 = max(0, min(self.p3.get('actuation_range', 270), phy3))
         pls3 = mapper.physical_to_pulse(phy3, self.p3['motor_config'])
         
-        # Slot 4 (min_pos: top → phy = zero + theta)
+        # Slot 4 (min_pos: top → polarity = -1 → phy = zero - theta)
         zero_off4 = self.p4.get('zero_offset', 0)
-        phy4 = zero_off4 + theta4
+        phy4 = zero_off4 - theta4
         phy4 = max(0, min(self.p4.get('actuation_range', 180), phy4))
         pls4 = mapper.physical_to_pulse(phy4, self.p4['motor_config'])
         
