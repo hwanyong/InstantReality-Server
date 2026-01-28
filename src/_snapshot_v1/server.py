@@ -3,14 +3,16 @@ import json
 import os
 import time
 
+# Calculate base directory for relative path resolution
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 from aiohttp import web
 from aiortc import RTCPeerConnection, RTCSessionDescription, RTCRtpSender
 
 from webrtc.video_track import OpenCVVideoCapture
 from multi_cam_capture import discover_cameras
-from camera_manager import stop_all, init_cameras, get_active_cameras, get_camera, refresh_cameras, get_camera_by_role, start_polling
+from camera_manager import stop_all, init_cameras, get_active_cameras, get_camera
 from ai_engine import GeminiBrain
-from camera_mapping import get_available_devices, assign_role as mapping_assign_role, match_roles, VALID_ROLES
 
 # Global list of active PeerConnections
 pcs = set()
@@ -18,9 +20,6 @@ brain = GeminiBrain()
 
 # Track registry: {pc_id: {camera_index: track}}
 active_tracks = {}
-
-# WebSocket clients for real-time camera updates
-ws_clients = set()
 
 # CORS Middleware for cross-origin requests
 @web.middleware
@@ -38,16 +37,13 @@ async def cors_middleware(request, handler):
 async def offer(request):
     params = await request.json()
     offer = RTCSessionDescription(sdp=params["sdp"], type=params["type"])
-    
-    # Optional: Request specific camera by role
-    requested_role = params.get("role")
 
     pc = RTCPeerConnection()
     pcs.add(pc)
     pc_id = str(id(pc))
     active_tracks[pc_id] = {}
 
-    print(f"New connection: {pc} (client_id: {pc_id}, role: {requested_role})")
+    print(f"New connection: {pc} (client_id: {pc_id})")
 
     # Prepare logic to run when connection closes
     @pc.on("connectionstatechange")
@@ -58,19 +54,9 @@ async def offer(request):
             pcs.discard(pc)
             active_tracks.pop(pc_id, None)
 
-    # Determine which cameras to stream
-    if requested_role:
-        # Single camera by role
-        cam = get_camera_by_role(requested_role)
-        if cam:
-            camera_indices = [cam.camera_index]
-        else:
-            print(f"Warning: Role '{requested_role}' not found or not connected!")
-            camera_indices = []
-    else:
-        # Broadcast Mode: Use all running cameras
-        camera_indices = get_active_cameras()
-        
+    # Broadcast Mode: Use already-running cameras from startup
+    # No re-discovery needed, cameras are initialized at server start
+    camera_indices = get_active_cameras()
     if not camera_indices:
         print("Warning: No cameras running!")
     
@@ -115,23 +101,23 @@ async def offer(request):
     )
 
 async def index(request):
-    content = open(os.path.join("src/static", "index.html"), "r", encoding="utf-8").read()
+    content = open(os.path.join(BASE_DIR, "static", "index.html"), "r", encoding="utf-8").read()
     return web.Response(content_type="text/html", text=content)
 
 async def javascript(request):
-    content = open(os.path.join("src/static", "client.mjs"), "r", encoding="utf-8").read()
+    content = open(os.path.join(BASE_DIR, "static", "client.mjs"), "r", encoding="utf-8").read()
     return web.Response(content_type="application/javascript", text=content)
 
 async def serve_sdk_library(request):
-    content = open(os.path.join("src/sdk", "instant-reality.mjs"), "r", encoding="utf-8").read()
+    content = open(os.path.join(BASE_DIR, "sdk", "instant-reality.mjs"), "r", encoding="utf-8").read()
     return web.Response(content_type="application/javascript", text=content)
 
 async def serve_sdk_example(request):
-    content = open(os.path.join("src/sdk", "example.html"), "r", encoding="utf-8").read()
+    content = open(os.path.join(BASE_DIR, "sdk", "example.html"), "r", encoding="utf-8").read()
     return web.Response(content_type="text/html", text=content)
 
 async def serve_sdk_types(request):
-    content = open(os.path.join("src/sdk", "instant-reality.d.ts"), "r", encoding="utf-8").read()
+    content = open(os.path.join(BASE_DIR, "sdk", "instant-reality.d.ts"), "r", encoding="utf-8").read()
     return web.Response(content_type="application/typescript", text=content)
 
 async def set_focus_handler(request):
@@ -256,98 +242,10 @@ async def pause_camera_handler(request):
     except Exception as e:
         return web.json_response({"success": False, "error": str(e)}, status=500)
 
-async def scan_cameras_handler(request):
-    """Scan for connected cameras and return their status with roles."""
-    try:
-        # Get all devices first (for unassigned ones)
-        all_devices = get_available_devices()
-        
-        # Refresh camera connections
-        camera_status = refresh_cameras()
-        
-        # Build response with both mapped and unmapped devices
-        mapped_paths = {d["path"] for d in match_roles().values() if d["path"]}
-        
-        result = {
-            "cameras": camera_status,
-            "available_devices": [
-                {"index": d["index"], "name": d["name"], "path": d["path"], "vid": d["vid"], "pid": d["pid"]}
-                for d in all_devices
-            ],
-            "valid_roles": VALID_ROLES
-        }
-        return web.json_response(result)
-    except Exception as e:
-        print(f"Scan error: {e}")
-        return web.json_response({"error": str(e)}, status=500)
-
-async def assign_role_handler(request):
-    """Assign a role to a device path."""
-    try:
-        data = await request.json()
-        device_path = data.get("device_path")
-        role_name = data.get("role_name")
-        
-        if not device_path or not role_name:
-            return web.json_response({"error": "device_path and role_name required"}, status=400)
-        
-        mapping_assign_role(device_path, role_name)
-        
-        return web.json_response({"success": True, "device_path": device_path, "role_name": role_name})
-    except ValueError as e:
-        return web.json_response({"error": str(e)}, status=400)
-    except Exception as e:
-        return web.json_response({"error": str(e)}, status=500)
-
-async def cameras_handler(request):
-    """List all active cameras with their roles."""
-    try:
-        camera_status = refresh_cameras()
-        return web.json_response({"cameras": camera_status})
-    except Exception as e:
-        return web.json_response({"error": str(e)}, status=500)
-
-async def websocket_handler(request):
-    """WebSocket endpoint for real-time camera change notifications."""
-    ws = web.WebSocketResponse()
-    await ws.prepare(request)
-    ws_clients.add(ws)
-    print(f"WebSocket client connected. Total: {len(ws_clients)}")
-    try:
-        async for msg in ws:
-            pass  # Keep-alive, no client-to-server messages needed
-    finally:
-        ws_clients.discard(ws)
-        print(f"WebSocket client disconnected. Total: {len(ws_clients)}")
-    return ws
-
-async def broadcast_camera_change(event_type, cameras):
-    """Broadcast camera change event to all connected WebSocket clients."""
-    if not ws_clients:
-        return
-    msg = json.dumps({"type": event_type, "cameras": cameras})
-    dead_clients = set()
-    for ws in ws_clients:
-        try:
-            await ws.send_str(msg)
-        except Exception:
-            dead_clients.add(ws)
-    ws_clients.difference_update(dead_clients)
-    print(f"Broadcasted {event_type} to {len(ws_clients)} clients")
-
-async def on_camera_change(added, removed, cameras):
-    """Callback for polling - broadcasts camera changes to WebSocket clients."""
-    await broadcast_camera_change("camera_change", cameras)
-
-async def on_startup(app):
-    """Start background polling when server starts."""
-    asyncio.create_task(start_polling(on_camera_change, interval=3))
-    print("Background camera polling started (3s interval)")
-
 if __name__ == "__main__":
     # 1. Discover and start cameras at server boot (Broadcast Mode)
     print("Discovering and initializing cameras...")
-    discovered_indices = discover_cameras(max_indices=8)
+    discovered_indices = discover_cameras(max_indices=4)
     if discovered_indices:
         init_cameras(discovered_indices, width=1920, height=1080)
     else:
@@ -364,17 +262,11 @@ if __name__ == "__main__":
     app.router.add_get("/capture", capture_handler)
     app.router.add_post("/analyze", analyze_handler)
     app.router.add_post("/pause_camera", pause_camera_handler)
-    # Camera management routes
-    app.router.add_post("/scan_cameras", scan_cameras_handler)
-    app.router.add_post("/assign_role", assign_role_handler)
-    app.router.add_get("/cameras", cameras_handler)
-    app.router.add_get("/ws", websocket_handler)
     # SDK routes
     app.router.add_get("/sdk/instant-reality.mjs", serve_sdk_library)
     app.router.add_get("/sdk/instant-reality.d.ts", serve_sdk_types)
     app.router.add_get("/sdk/example.html", serve_sdk_example)
     app.on_shutdown.append(on_shutdown)
-    app.on_startup.append(on_startup)
     
     print("Server started at http://localhost:8080")
     web.run_app(app, port=8080)

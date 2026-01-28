@@ -39,12 +39,10 @@ export class InstantReality {
         this.maxCameras = options.maxCameras || 4
         this.iceServers = options.iceServers || [{ urls: 'stun:stun.l.google.com:19302' }]
         this.pc = null
-        this.ws = null
         this.trackCounter = 0
         this.listeners = {}
         this.tracks = new Map()
         this.clientId = null
-        this._lastConnectOptions = {}
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -140,45 +138,10 @@ export class InstantReality {
         this.clientId = answer.client_id
         await pc.setRemoteDescription(answer)
 
-        // Connect WebSocket for real-time camera updates
-        this._connectWebSocket()
-        this._lastConnectOptions = options
-
         return this
     }
 
-    _connectWebSocket() {
-        if (this.ws) {
-            this.ws.close()
-        }
-
-        const wsProtocol = window.location.protocol == 'https:' ? 'wss:' : 'ws:'
-        const wsUrl = `${wsProtocol}//${window.location.host}/ws`
-
-        this.ws = new WebSocket(wsUrl)
-
-        this.ws.onmessage = (event) => {
-            const data = JSON.parse(event.data)
-            if (data.type == 'camera_change') {
-                console.log('Camera change detected:', data.cameras)
-                this.emit('cameraChange', data.cameras)
-            }
-        }
-
-        this.ws.onerror = (error) => {
-            console.warn('WebSocket error:', error)
-        }
-
-        this.ws.onclose = () => {
-            console.log('WebSocket closed')
-        }
-    }
-
     disconnect() {
-        if (this.ws) {
-            this.ws.close()
-            this.ws = null
-        }
         if (this.pc) {
             this.pc.close()
             this.pc = null
@@ -186,13 +149,6 @@ export class InstantReality {
         this.tracks.clear()
         this.trackCounter = 0
         this.emit('disconnected')
-        return this
-    }
-
-    async reconnect() {
-        console.log('Reconnecting due to camera change...')
-        this.disconnect()
-        await this.connect(this._lastConnectOptions)
         return this
     }
 

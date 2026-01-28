@@ -14,7 +14,7 @@ const template = document.getElementById('video-control-template')
 
 const client = new InstantReality({
     serverUrl: window.location.origin,
-    maxCameras: 8
+    maxCameras: 4
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -168,19 +168,6 @@ client.on('error', (error) => {
     streamBtn.className = ''
     streamBtn.disabled = false
     alert(error.message)
-})
-
-client.on('cameraChange', async (cameras) => {
-    console.log('Camera change detected, reconnecting...', cameras)
-
-    // Only reconnect if currently connected
-    if (client.pc) {
-        streamBtn.disabled = true
-        streamBtn.innerText = 'Reconnecting...'
-        videoGrid.innerHTML = ''
-
-        await client.reconnect()
-    }
 })
 
 // ─────────────────────────────────────────────────────────────────────────────

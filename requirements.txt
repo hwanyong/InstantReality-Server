@@ -5,3 +5,4 @@ aiortc
 google-genai
 aiohttp
 aiohttp-cors
+pyusbcameraindex
