@@ -4,3 +4,4 @@ numpy
 aiortc
 google-genai
 aiohttp
+aiohttp-cors
