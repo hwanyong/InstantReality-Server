@@ -23,7 +23,7 @@ class GeminiBrain:
         else:
             print("Gemini Client not initialized (Missing Key)")
             
-        self.model_name = os.environ.get("GEMINI_MODEL", "gemini-1.5-pro-latest")
+        self.model_name = os.environ.get("GEMINI_MODEL", "gemini-robotics-er-1.5-preview")
 
     def analyze_frame(self, frame_bgr, instruction):
         """
