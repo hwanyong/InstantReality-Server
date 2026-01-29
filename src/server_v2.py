@@ -1,6 +1,6 @@
 # src/server_v2.py
 # Gemini Robotics Web App Server (v2)
-# Runs on port 8081, separate from v1 (port 8080)
+# Main server - port 8080
 
 import os
 import sys
@@ -19,6 +19,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from lib.robot_controller import RobotController
 from lib.coordinate_transform import CoordinateTransformer, WorkspaceConfig
 from src.camera_manager import get_camera, get_active_cameras, init_cameras
+from src.camera_mapping import get_index_by_role
 from src.ai_engine import GeminiBrain
 
 # Configure logging
@@ -29,6 +30,7 @@ logger = logging.getLogger(__name__)
 robot: RobotController = None
 transformer: CoordinateTransformer = None
 brain: GeminiBrain = None
+SCENE_INVENTORY = []
 
 
 # =============================================================================
@@ -206,6 +208,49 @@ async def handle_ik_test(request):
     return web.json_response(result)
 
 
+async def handle_scene_init(request):
+    """POST /api/scene/init - Scan and initialize scene inventory"""
+    global SCENE_INVENTORY
+    
+    # Get TopView camera
+    topview_idx = get_index_by_role("TopView")
+    quarterview_idx = get_index_by_role("QuarterView")
+    
+    if topview_idx is None:
+        return web.json_response({
+            "error": "TopView camera not configured",
+            "objects": []
+        }, status=400)
+    
+    # Capture frames
+    topview_cam = get_camera(topview_idx)
+    topview_frame, _ = topview_cam.get_frames()
+    
+    if topview_frame is None:
+        return web.json_response({
+            "error": "Failed to capture TopView frame",
+            "objects": []
+        }, status=500)
+    
+    quarterview_frame = None
+    if quarterview_idx is not None:
+        quarterview_cam = get_camera(quarterview_idx)
+        quarterview_frame, _ = quarterview_cam.get_frames()
+    
+    # Call AI scan
+    result = brain.scan_scene(topview_frame, quarterview_frame)
+    
+    if "error" not in result or result.get("objects"):
+        SCENE_INVENTORY = result.get("objects", [])
+        logger.info(f"Scene initialized: {len(SCENE_INVENTORY)} objects detected")
+    
+    return web.json_response(result)
+
+
+async def handle_scene_get(request):
+    """GET /api/scene - Get current scene inventory"""
+    return web.json_response({"objects": SCENE_INVENTORY})
+
 # =============================================================================
 # Static Files & App Setup
 # =============================================================================
@@ -232,9 +277,18 @@ async def init_app():
     brain = GeminiBrain()
     logger.info("Gemini brain initialized")
     
-    # Initialize cameras (index 0)
-    init_cameras([0], width=1280, height=720)
-    logger.info("Cameras initialized")
+    # Initialize cameras by role
+    topview_idx = get_index_by_role("TopView")
+    quarterview_idx = get_index_by_role("QuarterView")
+    
+    camera_indices = [i for i in [topview_idx, quarterview_idx] if i is not None]
+    if camera_indices:
+        init_cameras(camera_indices, width=1280, height=720)
+        logger.info(f"Cameras initialized by role: TopView={topview_idx}, QuarterView={quarterview_idx}")
+    else:
+        # Fallback to default camera 0
+        init_cameras([0], width=1280, height=720)
+        logger.warning("No role-mapped cameras found, using default camera 0")
 
 
 def create_app():
@@ -258,6 +312,8 @@ def create_app():
         web.post('/api/execute', handle_execute),
         web.post('/api/estop', handle_estop),
         web.post('/api/ik/test', handle_ik_test),
+        web.post('/api/scene/init', handle_scene_init),
+        web.get('/api/scene', handle_scene_get),
     ]
     
     for route in api_routes:
@@ -282,7 +338,7 @@ def create_app():
 
 
 if __name__ == '__main__':
-    PORT = 8081
+    PORT = 8080
     app = create_app()
     logger.info(f"Starting Gemini Robotics Server v2 on port {PORT}")
     web.run_app(app, host='0.0.0.0', port=PORT)

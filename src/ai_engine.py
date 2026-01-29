@@ -3,8 +3,11 @@ import json
 import base64
 import cv2
 import numpy as np
+from dotenv import load_dotenv
 from google import genai
 from google.genai import types
+
+load_dotenv()
 
 class GeminiBrain:
     def __init__(self):
@@ -80,6 +83,87 @@ class GeminiBrain:
         except Exception as e:
             print(f"AI Analysis Error: {e}")
             return {"error": str(e)}
+
+    def _encode_frame(self, frame_bgr):
+        """Convert BGR frame to JPEG bytes for Gemini API"""
+        frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+        success, buffer = cv2.imencode(".jpg", frame_rgb)
+        if not success:
+            return None
+        return buffer.tobytes()
+
+    def scan_scene(self, topview_frame, quarterview_frame=None):
+        """
+        Scan entire scene for object inventory.
+        Used at server initialization or reset.
+        Returns list of detected objects with bounding boxes.
+        """
+        if not self.client:
+            return {"error": "AI not initialized", "objects": []}
+
+        try:
+            # Encode images
+            topview_bytes = self._encode_frame(topview_frame)
+            if topview_bytes is None:
+                return {"error": "Failed to encode TopView", "objects": []}
+
+            contents = []
+            
+            # Build prompt for scene inventory
+            prompt = """You are scanning a robot workspace to create an object inventory.
+
+Image 1: TOP-DOWN VIEW (overhead camera) - Use this as the MASTER reference for all coordinates.
+"""
+            if quarterview_frame is not None:
+                quarterview_bytes = self._encode_frame(quarterview_frame)
+                if quarterview_bytes:
+                    prompt += "Image 2: QUARTER VIEW (45-degree angle) - Use this for understanding object height and orientation.\n"
+            
+            prompt += """
+Task: Detect ALL moveable objects on the table.
+
+Return a JSON object with:
+{
+    "objects": [
+        {
+            "label": "descriptive name (e.g., red cup)",
+            "box_2d": [ymin, xmin, ymax, xmax],
+            "grasp_strategy": "vertical" or "horizontal"
+        }
+    ]
+}
+
+Rules:
+- Coordinates are normalized 0-1000 based on Image 1 (TopView)
+- Do NOT detect the robot arms
+- Distinguish identical items by color or position in label
+"""
+            
+            # Add images to contents
+            contents.append(prompt)
+            contents.append(types.Part.from_bytes(data=topview_bytes, mime_type="image/jpeg"))
+            
+            if quarterview_frame is not None:
+                quarterview_bytes = self._encode_frame(quarterview_frame)
+                if quarterview_bytes:
+                    contents.append(types.Part.from_bytes(data=quarterview_bytes, mime_type="image/jpeg"))
+
+            # Call API
+            response = self.client.models.generate_content(
+                model=self.model_name,
+                contents=contents,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    temperature=0.5
+                )
+            )
+            
+            result = json.loads(response.text)
+            return result
+
+        except Exception as e:
+            print(f"Scene Scan Error: {e}")
+            return {"error": str(e), "objects": []}
 
 if __name__ == "__main__":
     # Simple test
