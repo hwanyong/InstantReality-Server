@@ -3,8 +3,11 @@ import json
 import base64
 import cv2
 import numpy as np
+from dotenv import load_dotenv
 from google import genai
 from google.genai import types
+
+load_dotenv()
 
 class GeminiBrain:
     def __init__(self):
@@ -23,7 +26,7 @@ class GeminiBrain:
         else:
             print("Gemini Client not initialized (Missing Key)")
             
-        self.model_name = os.environ.get("GEMINI_MODEL", "gemini-1.5-pro-latest")
+        self.model_name = os.environ.get("GEMINI_MODEL", "gemini-robotics-er-1.5-preview")
 
     def analyze_frame(self, frame_bgr, instruction):
         """
