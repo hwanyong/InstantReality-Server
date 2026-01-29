@@ -16,8 +16,8 @@ import aiohttp_cors
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.camera_manager import get_camera, get_active_cameras, init_cameras
-from src.camera_mapping import get_index_by_role, get_available_devices, match_roles, assign_role, VALID_ROLES
+from src.camera_manager import get_camera, get_active_cameras, init_cameras, set_camera_focus, set_camera_exposure, set_camera_auto_exposure
+from src.camera_mapping import get_index_by_role, get_available_devices, match_roles, assign_role, VALID_ROLES, get_camera_settings, save_camera_settings, get_all_settings
 from src.ai_engine import GeminiBrain
 
 # Configure logging
@@ -165,6 +165,78 @@ async def handle_cameras_status(request):
     })
 
 
+async def handle_cameras_focus(request):
+    """POST /api/cameras/focus - Set focus for a camera"""
+    data = await request.json()
+    role = data.get("role")
+    auto = data.get("auto", True)
+    value = data.get("value", 0)
+    
+    if not role:
+        return web.json_response({"error": "role required"}, status=400)
+    
+    idx = get_index_by_role(role)
+    if idx is None:
+        return web.json_response({"error": f"Role {role} not connected"}, status=404)
+    
+    set_camera_focus(idx, auto, value)
+    
+    # Save settings
+    save_camera_settings(role, {"focus": {"auto": auto, "value": value}})
+    
+    return web.json_response({"success": True, "role": role, "focus": {"auto": auto, "value": value}})
+
+
+async def handle_cameras_exposure(request):
+    """POST /api/cameras/exposure - Set exposure for a camera"""
+    data = await request.json()
+    role = data.get("role")
+    auto = data.get("auto", False)
+    value = data.get("value", -5)
+    target_brightness = data.get("target_brightness", 128)
+    
+    if not role:
+        return web.json_response({"error": "role required"}, status=400)
+    
+    idx = get_index_by_role(role)
+    if idx is None:
+        return web.json_response({"error": f"Role {role} not connected"}, status=404)
+    
+    if auto:
+        set_camera_auto_exposure(idx, True, target_brightness)
+    else:
+        set_camera_auto_exposure(idx, False, target_brightness)
+        set_camera_exposure(idx, value)
+    
+    # Save settings
+    save_camera_settings(role, {"exposure": {"auto": auto, "value": value, "target_brightness": target_brightness}})
+    
+    return web.json_response({
+        "success": True, 
+        "role": role, 
+        "exposure": {"auto": auto, "value": value, "target_brightness": target_brightness}
+    })
+
+
+async def handle_cameras_settings_get(request):
+    """GET /api/cameras/settings - Get all camera settings"""
+    settings = get_all_settings()
+    return web.json_response(settings)
+
+
+async def handle_cameras_settings_save(request):
+    """POST /api/cameras/settings - Save camera settings for a role"""
+    data = await request.json()
+    role = data.get("role")
+    settings = data.get("settings", {})
+    
+    if not role:
+        return web.json_response({"error": "role required"}, status=400)
+    
+    result = save_camera_settings(role, settings)
+    return web.json_response({"success": True, "role": role, "settings": result})
+
+
 async def handle_stream(request):
     """GET /api/stream/{camera} - MJPEG stream for live preview"""
     import cv2
@@ -236,6 +308,27 @@ async def init_app():
     if camera_indices:
         init_cameras(camera_indices, width=1280, height=720)
         logger.info(f"Cameras initialized: {role_status}")
+        
+        # Apply saved settings to each camera
+        all_settings = get_all_settings()
+        for role, info in all_settings.items():
+            if info["connected"] and info["index"] is not None:
+                idx = info["index"]
+                settings = info["settings"]
+                
+                # Apply focus settings
+                focus = settings.get("focus", {})
+                set_camera_focus(idx, focus.get("auto", True), focus.get("value", 0))
+                
+                # Apply exposure settings
+                exposure = settings.get("exposure", {})
+                if exposure.get("auto", False):
+                    set_camera_auto_exposure(idx, True, exposure.get("target_brightness", 128))
+                else:
+                    set_camera_auto_exposure(idx, False, exposure.get("target_brightness", 128))
+                    set_camera_exposure(idx, exposure.get("value", -5))
+                
+                logger.info(f"Applied settings for {role} (camera {idx})")
     else:
         # Fallback to default camera 0
         init_cameras([0], width=1280, height=720)
@@ -266,6 +359,11 @@ def create_app():
         web.post('/api/cameras/assign', handle_cameras_assign),
         web.get('/api/cameras/status', handle_cameras_status),
         web.get('/api/stream/{camera}', handle_stream),
+        # Camera Control API
+        web.post('/api/cameras/focus', handle_cameras_focus),
+        web.post('/api/cameras/exposure', handle_cameras_exposure),
+        web.get('/api/cameras/settings', handle_cameras_settings_get),
+        web.post('/api/cameras/settings', handle_cameras_settings_save),
     ]
     
     for route in api_routes:

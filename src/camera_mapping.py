@@ -110,3 +110,71 @@ def get_index_by_role(role_name):
     if role_name in roles and roles[role_name]["connected"]:
         return roles[role_name]["index"]
     return None
+
+
+def get_camera_settings(role_name=None):
+    """
+    Get camera settings for a role or all roles.
+    Returns settings dict or None if not found.
+    """
+    config = load_mapping()
+    settings = config.get("camera_settings", {})
+    
+    if role_name:
+        return settings.get(role_name, get_default_settings())
+    return settings
+
+
+def get_default_settings():
+    """Return default camera settings."""
+    return {
+        "focus": {"auto": True, "value": 0},
+        "exposure": {"auto": False, "value": -5, "target_brightness": 128}
+    }
+
+
+def save_camera_settings(role_name, settings):
+    """
+    Save camera settings for a specific role.
+    settings: {focus: {auto, value}, exposure: {auto, value, target_brightness}}
+    """
+    if role_name not in VALID_ROLES:
+        raise ValueError(f"Invalid role: {role_name}")
+    
+    config = load_mapping()
+    if "camera_settings" not in config:
+        config["camera_settings"] = {}
+    
+    # Merge with existing settings
+    existing = config["camera_settings"].get(role_name, get_default_settings())
+    
+    if "focus" in settings:
+        existing["focus"] = {**existing.get("focus", {}), **settings["focus"]}
+    if "exposure" in settings:
+        existing["exposure"] = {**existing.get("exposure", {}), **settings["exposure"]}
+    
+    config["camera_settings"][role_name] = existing
+    save_mapping(config)
+    
+    return existing
+
+
+def get_all_settings():
+    """
+    Get all camera settings for all roles with role-to-index mapping.
+    Returns: {role: {settings, index, connected}}
+    """
+    config = load_mapping()
+    saved_settings = config.get("camera_settings", {})
+    roles = match_roles()
+    
+    result = {}
+    for role in VALID_ROLES:
+        role_info = roles.get(role, {"index": None, "connected": False})
+        result[role] = {
+            "settings": saved_settings.get(role, get_default_settings()),
+            "index": role_info.get("index"),
+            "connected": role_info.get("connected", False)
+        }
+    
+    return result
