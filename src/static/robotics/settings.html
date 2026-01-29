@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Camera Settings</title>
+    <link rel="stylesheet" href="styles.css">
+    <style>
+        .settings-container {
+            padding: 24px;
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .camera-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 20px;
+            margin-top: 20px;
+        }
+
+        @media (max-width: 900px) {
+            .camera-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .camera-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius);
+            overflow: hidden;
+        }
+
+        .camera-preview {
+            width: 100%;
+            aspect-ratio: 16 / 9;
+            background: #000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-secondary);
+        }
+
+        .camera-preview img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+
+        .camera-info {
+            padding: 16px;
+            border-top: 1px solid var(--border-color);
+        }
+
+        .camera-name {
+            font-size: 1.1rem;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .camera-details {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            margin-bottom: 12px;
+        }
+
+        .role-select {
+            width: 100%;
+            padding: 10px 12px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            color: var(--text-primary);
+            font-size: 1rem;
+            cursor: pointer;
+        }
+
+        .role-select:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+
+        .role-select option {
+            background: var(--bg-secondary);
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 500;
+            margin-left: 8px;
+        }
+
+        .status-connected {
+            background: rgba(63, 185, 80, 0.2);
+            color: var(--success);
+        }
+
+        .status-disconnected {
+            background: rgba(248, 81, 73, 0.2);
+            color: var(--danger);
+        }
+
+        .action-bar {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 8px;
+            font-size: 0.95rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .btn-primary {
+            background: var(--accent);
+            color: #fff;
+        }
+
+        .btn-primary:hover {
+            background: var(--accent-hover);
+        }
+
+        .btn-secondary {
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+        }
+
+        .btn-secondary:hover {
+            background: var(--bg-card);
+        }
+
+        .nav-link {
+            color: var(--accent);
+            text-decoration: none;
+        }
+
+        .nav-link:hover {
+            text-decoration: underline;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: var(--text-secondary);
+        }
+
+        .toast {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            padding: 12px 20px;
+            background: var(--success);
+            color: #fff;
+            border-radius: 8px;
+            opacity: 0;
+            transform: translateY(20px);
+            transition: all 0.3s;
+            z-index: 1000;
+        }
+
+        .toast.show {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    </style>
+</head>
+
+<body>
+    <div id="app">
+        <header class="header">
+            <h1>📷 Camera Settings</h1>
+            <nav>
+                <a href="scene.html" class="nav-link">← Scene Scanner</a>
+            </nav>
+        </header>
+
+        <main class="settings-container">
+            <div class="action-bar">
+                <button id="scanBtn" class="btn btn-primary">🔍 Scan Cameras</button>
+                <button id="refreshBtn" class="btn btn-secondary">🔄 Refresh Preview</button>
+            </div>
+
+            <div id="cameraGrid" class="camera-grid">
+                <div class="empty-state">
+                    <p>Click "Scan Cameras" to detect connected devices</p>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <div id="toast" class="toast"></div>
+
+    <script>
+        const VALID_ROLES = ["TopView", "QuarterView", "LeftRobot", "RightRobot"]
+        let devices = []
+        let currentRoles = {}
+
+        // Show toast notification
+        function showToast(message, duration = 2000) {
+            const toast = document.getElementById('toast')
+            toast.textContent = message
+            toast.classList.add('show')
+            setTimeout(() => toast.classList.remove('show'), duration)
+        }
+
+        // Scan for cameras
+        async function scanCameras() {
+            const btn = document.getElementById('scanBtn')
+            btn.disabled = true
+            btn.textContent = '⏳ Scanning...'
+
+            try {
+                const res = await fetch('/api/cameras/scan', { method: 'POST' })
+                const data = await res.json()
+
+                devices = data.devices || []
+                currentRoles = {}
+
+                // Build role lookup from current mappings
+                for (const [role, info] of Object.entries(data.roles || {})) {
+                    if (info.path) {
+                        currentRoles[info.path] = role
+                    }
+                }
+
+                renderCameraGrid()
+                showToast(`Found ${devices.length} camera(s)`)
+            } catch (err) {
+                showToast('Failed to scan cameras')
+                console.error(err)
+            } finally {
+                btn.disabled = false
+                btn.textContent = '🔍 Scan Cameras'
+            }
+        }
+
+        // Assign role to camera
+        async function assignRole(devicePath, role) {
+            if (!role) return
+
+            try {
+                const res = await fetch('/api/cameras/assign', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ device_path: devicePath, role: role })
+                })
+
+                if (res.ok) {
+                    currentRoles[devicePath] = role
+                    showToast(`Assigned ${role}`)
+                } else {
+                    const err = await res.json()
+                    showToast(err.error || 'Failed to assign role')
+                }
+            } catch (err) {
+                showToast('Failed to assign role')
+                console.error(err)
+            }
+        }
+
+        // Render camera grid
+        function renderCameraGrid() {
+            const grid = document.getElementById('cameraGrid')
+
+            if (devices.length == 0) {
+                grid.innerHTML = `
+                    <div class="empty-state">
+                        <p>No cameras detected. Check USB connections.</p>
+                    </div>
+                `
+                return
+            }
+
+            grid.innerHTML = devices.map(device => {
+                const currentRole = currentRoles[device.path] || ''
+
+                return `
+                    <div class="camera-card" data-path="${device.path}">
+                        <div class="camera-preview">
+                            <img src="/api/stream/${device.index}" 
+                                 alt="Camera ${device.index}"
+                                 onerror="this.style.display='none'; this.parentElement.innerHTML='<span>No preview available</span>'">
+                        </div>
+                        <div class="camera-info">
+                            <div class="camera-name">
+                                Camera ${device.index}: ${device.name}
+                                <span class="status-badge status-connected">Connected</span>
+                            </div>
+                            <div class="camera-details">
+                                VID: ${device.vid} | PID: ${device.pid}
+                            </div>
+                            <select class="role-select" 
+                                    onchange="assignRole('${device.path.replace(/\\/g, '\\\\')}', this.value)">
+                                <option value="">-- Select Role --</option>
+                                ${VALID_ROLES.map(role => `
+                                    <option value="${role}" ${currentRole == role ? 'selected' : ''}>
+                                        ${role}
+                                    </option>
+                                `).join('')}
+                            </select>
+                        </div>
+                    </div>
+                `
+            }).join('')
+        }
+
+        // Refresh preview streams
+        function refreshPreview() {
+            const images = document.querySelectorAll('.camera-preview img')
+            images.forEach(img => {
+                const src = img.src.split('?')[0]
+                img.src = src + '?t=' + Date.now()
+            })
+            showToast('Preview refreshed')
+        }
+
+        // Event listeners
+        document.getElementById('scanBtn').addEventListener('click', scanCameras)
+        document.getElementById('refreshBtn').addEventListener('click', refreshPreview)
+
+        // Auto-scan on load
+        scanCameras()
+    </script>
+</body>
+
+</html>

@@ -17,7 +17,7 @@ PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.camera_manager import get_camera, get_active_cameras, init_cameras
-from src.camera_mapping import get_index_by_role
+from src.camera_mapping import get_index_by_role, get_available_devices, match_roles, assign_role, VALID_ROLES
 from src.ai_engine import GeminiBrain
 
 # Configure logging
@@ -116,6 +116,98 @@ async def handle_scene_get(request):
 
 
 # =============================================================================
+# Camera Management API
+# =============================================================================
+
+async def handle_cameras_scan(request):
+    """POST /api/cameras/scan - Scan for connected cameras"""
+    devices = get_available_devices()
+    roles = match_roles(devices)
+    
+    return web.json_response({
+        "devices": devices,
+        "roles": roles,
+        "valid_roles": VALID_ROLES
+    })
+
+
+async def handle_cameras_assign(request):
+    """POST /api/cameras/assign - Assign role to a camera"""
+    data = await request.json()
+    device_path = data.get("device_path")
+    role_name = data.get("role")
+    
+    if not device_path or not role_name:
+        return web.json_response(
+            {"error": "device_path and role required"},
+            status=400
+        )
+    
+    try:
+        assign_role(device_path, role_name)
+        return web.json_response({
+            "success": True,
+            "device_path": device_path,
+            "role": role_name
+        })
+    except ValueError as e:
+        return web.json_response({"error": str(e)}, status=400)
+
+
+async def handle_cameras_status(request):
+    """GET /api/cameras/status - Get current camera status"""
+    active = get_active_cameras()
+    roles = match_roles()
+    
+    return web.json_response({
+        "active_cameras": active,
+        "role_mapping": roles
+    })
+
+
+async def handle_stream(request):
+    """GET /api/stream/{camera} - MJPEG stream for live preview"""
+    import cv2
+    
+    camera_index = int(request.match_info.get('camera', 0))
+    cam = get_camera(camera_index)
+    
+    if cam is None:
+        return web.Response(text="Camera not found", status=404)
+    
+    response = web.StreamResponse(
+        status=200,
+        headers={
+            'Content-Type': 'multipart/x-mixed-replace; boundary=frame',
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive'
+        }
+    )
+    await response.prepare(request)
+    
+    try:
+        while True:
+            _, low_res = cam.get_frames()
+            if low_res is not None:
+                # Encode to JPEG
+                _, jpeg = cv2.imencode('.jpg', low_res, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                
+                # Send MJPEG frame
+                await response.write(
+                    b'--frame\r\n'
+                    b'Content-Type: image/jpeg\r\n\r\n' +
+                    jpeg.tobytes() +
+                    b'\r\n'
+                )
+            
+            await asyncio.sleep(0.033)  # ~30fps
+    except asyncio.CancelledError:
+        pass
+    
+    return response
+
+
+# =============================================================================
 # Static Files & App Setup
 # =============================================================================
 
@@ -127,14 +219,21 @@ async def init_app():
     brain = GeminiBrain()
     logger.info("Gemini brain initialized")
     
-    # Initialize cameras by role
-    topview_idx = get_index_by_role("TopView")
-    quarterview_idx = get_index_by_role("QuarterView")
+    # Initialize all role-mapped cameras
+    camera_indices = []
+    role_status = {}
     
-    camera_indices = [i for i in [topview_idx, quarterview_idx] if i is not None]
+    for role in VALID_ROLES:
+        idx = get_index_by_role(role)
+        if idx is not None:
+            camera_indices.append(idx)
+            role_status[role] = idx
+        else:
+            role_status[role] = None
+    
     if camera_indices:
         init_cameras(camera_indices, width=1280, height=720)
-        logger.info(f"Cameras initialized by role: TopView={topview_idx}, QuarterView={quarterview_idx}")
+        logger.info(f"Cameras initialized: {role_status}")
     else:
         # Fallback to default camera 0
         init_cameras([0], width=1280, height=720)
@@ -156,9 +255,15 @@ def create_app():
     
     # API routes
     api_routes = [
+        # Scene API
         web.get('/api/capture', handle_capture),
         web.post('/api/scene/init', handle_scene_init),
         web.get('/api/scene', handle_scene_get),
+        # Camera Management API
+        web.post('/api/cameras/scan', handle_cameras_scan),
+        web.post('/api/cameras/assign', handle_cameras_assign),
+        web.get('/api/cameras/status', handle_cameras_status),
+        web.get('/api/stream/{camera}', handle_stream),
     ]
     
     for route in api_routes:
