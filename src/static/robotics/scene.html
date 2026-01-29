@@ -146,12 +146,31 @@
         const jsonOutput = document.getElementById('json-output')
 
         let currentObjects = []
+        let roleMapping = {}  // Dynamic role to index mapping
+
+        // Load role mapping from server
+        async function loadRoleMapping() {
+            try {
+                const res = await fetch(`${API_BASE}/api/cameras/status`)
+                const data = await res.json()
+                roleMapping = {}
+
+                // Build roleMapping: { 'TopView': 2, 'QuarterView': 3, ... }
+                for (const [role, info] of Object.entries(data.role_mapping || {})) {
+                    if (info && info.index !== undefined) {
+                        roleMapping[role] = info.index
+                    }
+                }
+                console.log('Role mapping loaded:', roleMapping)
+            } catch (err) {
+                console.error('Failed to load role mapping:', err)
+            }
+        }
 
         // Capture and display camera frame
         async function captureFrame(cameraRole, canvas) {
             const ctx = canvas.getContext('2d')
-            const roleToIndex = { 'TopView': 0, 'QuarterView': 1 }
-            const idx = roleToIndex[cameraRole] ?? 0
+            const idx = roleMapping[cameraRole] ?? 0
 
             const res = await fetch(`${API_BASE}/api/capture?camera=${idx}`)
             const data = await res.json()
@@ -255,8 +274,12 @@
         scanBtn.addEventListener('click', scanScene)
         refreshBtn.addEventListener('click', refreshViews)
 
-        // Initial refresh
-        refreshViews()
+        // Initial load
+        async function init() {
+            await loadRoleMapping()
+            await refreshViews()
+        }
+        init()
     </script>
 </body>
 

@@ -201,8 +201,10 @@ async def handle_stream(request):
                 )
             
             await asyncio.sleep(0.033)  # ~30fps
-    except asyncio.CancelledError:
-        pass
+    except (asyncio.CancelledError, ConnectionResetError, Exception) as e:
+        # Client disconnected - this is normal behavior
+        if not isinstance(e, (asyncio.CancelledError, ConnectionResetError)):
+            logger.debug(f"Stream ended: {type(e).__name__}")
     
     return response
 
