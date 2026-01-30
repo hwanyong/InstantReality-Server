@@ -31,7 +31,7 @@ CONFIG_FILE = Path("servo_config.json")
 # Global state
 _serial_conn = None
 _config = None
-_motion_duration = 2.0  # Default 2 seconds
+_motion_duration = 3.0  # Default 3 seconds
 
 
 def load_config():

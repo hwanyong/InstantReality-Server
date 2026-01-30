@@ -234,6 +234,17 @@ function setupEventListeners() {
     document.getElementById('go-home-btn')?.addEventListener('click', goHome)
     document.getElementById('go-zero-btn')?.addEventListener('click', goToZero)
 
+    // Motion speed slider
+    const speedSlider = document.getElementById('motion-speed')
+    const speedValue = document.getElementById('speed-value')
+    speedSlider?.addEventListener('input', (e) => {
+        const val = e.target.value
+        speedValue.textContent = `${val}초`
+    })
+    speedSlider?.addEventListener('change', (e) => {
+        setMotionSpeed(parseFloat(e.target.value))
+    })
+
     // Grid preview
     document.getElementById('test-grid-btn')?.addEventListener('click', previewGridPoints)
 
@@ -787,5 +798,19 @@ async function goToZero() {
         }
     } catch (e) {
         updateRobotStatus(true, `❌ ${e.message}`)
+    }
+}
+
+async function setMotionSpeed(duration) {
+    try {
+        const response = await fetch(`${API_BASE}/robot/speed`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ duration: duration })
+        })
+        const result = await response.json()
+        console.log('Motion speed set:', result)
+    } catch (e) {
+        console.error('Failed to set motion speed:', e)
     }
 }
