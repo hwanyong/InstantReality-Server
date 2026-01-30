@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Robot Calibration - Gemini Robotics</title>
+    <meta name="description" content="AI-powered automatic robot calibration using Gemini vision">
+    <link rel="stylesheet" href="styles.css">
+    <style>
+        /* Additional styles for calibration page */
+        .calibration-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: var(--gap);
+        }
+
+        @media (max-width: 1200px) {
+            .calibration-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .progress-container {
+            background: var(--bg-secondary);
+            border-radius: 8px;
+            height: 8px;
+            margin: 12px 0;
+            overflow: hidden;
+        }
+
+        .progress-bar {
+            height: 100%;
+            background: var(--gradient-accent);
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+
+        .calibration-status {
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+            margin-bottom: 8px;
+        }
+
+        .calibration-step {
+            padding: 12px;
+            background: var(--bg-secondary);
+            border-radius: 8px;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .calibration-step.active {
+            border-left: 3px solid var(--accent);
+        }
+
+        .calibration-step.done {
+            opacity: 0.7;
+        }
+
+        .calibration-step.done::before {
+            content: '✓';
+            color: var(--success);
+            font-weight: bold;
+        }
+
+        .step-icon {
+            font-size: 1.5rem;
+        }
+
+        .step-content {
+            flex: 1;
+        }
+
+        .step-title {
+            font-weight: 500;
+        }
+
+        .step-desc {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 12px;
+        }
+
+        .stat-item {
+            text-align: center;
+            padding: 12px;
+            background: var(--bg-secondary);
+            border-radius: 8px;
+        }
+
+        .stat-value {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: var(--accent);
+        }
+
+        .stat-label {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+        }
+
+        .json-preview {
+            font-family: 'Consolas', monospace;
+            font-size: 0.7rem;
+            background: var(--bg-secondary);
+            padding: 12px;
+            border-radius: 8px;
+            max-height: 200px;
+            overflow: auto;
+            white-space: pre-wrap;
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 12px;
+        }
+
+        .nav-links a {
+            color: var(--accent);
+            text-decoration: none;
+            font-size: 0.875rem;
+        }
+
+        .nav-links a:hover {
+            text-decoration: underline;
+        }
+
+        .workspace-viz {
+            position: relative;
+            width: 100%;
+            aspect-ratio: 1.2;
+            background: var(--bg-secondary);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        .workspace-viz canvas {
+            width: 100%;
+            height: 100%;
+        }
+
+        .btn-group {
+            display: flex;
+            gap: 8px;
+            margin-top: 12px;
+        }
+
+        .btn-group .btn {
+            flex: 1;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="app">
+        <!-- Header -->
+        <header class="header">
+            <h1>🎯 Robot Calibration</h1>
+            <div class="status-bar">
+                <nav class="nav-links">
+                    <a href="index.html">← Back to Control</a>
+                    <a href="settings.html">Settings</a>
+                </nav>
+                <span id="connection-status" class="status disconnected">● Disconnected</span>
+            </div>
+        </header>
+
+        <main class="main-content calibration-grid">
+            <!-- Left Panel: Camera + Visualization -->
+            <section>
+                <!-- Camera View -->
+                <div class="video-section">
+                    <h2>📹 Camera View</h2>
+                    <div class="video-container">
+                        <canvas id="video-canvas" width="800" height="450"></canvas>
+                        <canvas id="ar-overlay" width="800" height="450"></canvas>
+                    </div>
+                    <div class="video-controls">
+                        <button id="capture-btn" class="btn">📷 Capture</button>
+                        <button id="detect-base-btn" class="btn">🔍 Detect Robot Base</button>
+                        <button id="detect-gripper-btn" class="btn">✋ Detect Gripper</button>
+                    </div>
+                </div>
+
+                <!-- Workspace Visualization -->
+                <div class="control-card" style="margin-top: var(--gap);">
+                    <h3>📐 Workspace Map</h3>
+                    <div class="workspace-viz">
+                        <canvas id="workspace-canvas"></canvas>
+                    </div>
+                    <div class="stats-grid" style="margin-top: 12px;">
+                        <div class="stat-item">
+                            <div class="stat-value" id="stat-width">--</div>
+                            <div class="stat-label">Width (mm)</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value" id="stat-height">--</div>
+                            <div class="stat-label">Height (mm)</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value" id="stat-points">--</div>
+                            <div class="stat-label">Cal Points</div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Right Panel: Calibration Controls -->
+            <section class="control-section">
+                <!-- Auto-Calibration -->
+                <div class="control-card">
+                    <h3>🎯 Auto-Calibration</h3>
+                    <p style="font-size: 0.75rem; color: var(--text-secondary); margin-bottom: 12px;">
+                        AI가 로봇 위치를 자동 감지하고 카메라-로봇 좌표 변환을 계산합니다.
+                    </p>
+
+                    <div class="calibration-status" id="cal-status">Ready to calibrate</div>
+                    <div class="progress-container">
+                        <div class="progress-bar" id="cal-progress"></div>
+                    </div>
+
+                    <!-- Calibration Steps -->
+                    <div id="cal-steps">
+                        <div class="calibration-step" id="step-1">
+                            <span class="step-icon">🎯</span>
+                            <div class="step-content">
+                                <div class="step-title">로봇 베이스 감지</div>
+                                <div class="step-desc">AI가 로봇 기준점을 찾습니다</div>
+                            </div>
+                        </div>
+                        <div class="calibration-step" id="step-2">
+                            <span class="step-icon">🔲</span>
+                            <div class="step-content">
+                                <div class="step-title">그리드 캘리브레이션</div>
+                                <div class="step-desc">9개 포인트 이동 및 감지</div>
+                            </div>
+                        </div>
+                        <div class="calibration-step" id="step-3">
+                            <span class="step-icon">📐</span>
+                            <div class="step-content">
+                                <div class="step-title">변환 계산</div>
+                                <div class="step-desc">Homography 매트릭스 계산</div>
+                            </div>
+                        </div>
+                        <div class="calibration-step" id="step-4">
+                            <span class="step-icon">🗺️</span>
+                            <div class="step-content">
+                                <div class="step-title">작업 범위 매핑</div>
+                                <div class="step-desc">IK로 도달 가능 영역 탐색</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="btn-group">
+                        <button id="start-cal-btn" class="btn-primary">🚀 Start Calibration</button>
+                        <button id="stop-cal-btn" class="btn-danger" disabled>⏹ Stop</button>
+                    </div>
+                </div>
+
+                <!-- Manual Calibration Controls -->
+                <div class="control-card">
+                    <h3>🎛️ Manual Grid Control</h3>
+                    <div class="ik-inputs">
+                        <label>Grid Size:
+                            <select id="grid-size">
+                                <option value="4">2×2 (4점)</option>
+                                <option value="9" selected>3×3 (9점)</option>
+                                <option value="16">4×4 (16점)</option>
+                            </select>
+                        </label>
+                        <label>Z Height:
+                            <input type="number" id="cal-z" value="120" step="10">
+                        </label>
+                    </div>
+                    <button id="test-grid-btn" class="btn">📍 Preview Grid Points</button>
+                </div>
+
+                <!-- Calibration Quality -->
+                <div class="control-card">
+                    <h3>📊 Calibration Quality</h3>
+                    <div class="stats-grid">
+                        <div class="stat-item">
+                            <div class="stat-value" id="stat-mean-err">--</div>
+                            <div class="stat-label">Mean Error (mm)</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value" id="stat-max-err">--</div>
+                            <div class="stat-label">Max Error (mm)</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value" id="stat-status">❓</div>
+                            <div class="stat-label">Status</div>
+                        </div>
+                    </div>
+                    <button id="verify-cal-btn" class="btn" style="width: 100%; margin-top: 12px;">🔬 Verify
+                        Calibration</button>
+                </div>
+
+                <!-- Calibration Data -->
+                <div class="control-card">
+                    <h3>💾 calibration.json</h3>
+                    <pre id="json-preview" class="json-preview">No calibration data</pre>
+                    <div class="btn-group">
+                        <button id="load-cal-btn" class="btn">📂 Load</button>
+                        <button id="save-cal-btn" class="btn">💾 Save</button>
+                        <button id="export-cal-btn" class="btn">📤 Export</button>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script type="module" src="calibration.mjs"></script>
+</body>
+
+</html>
