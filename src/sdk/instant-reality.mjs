@@ -164,6 +164,16 @@ export class InstantReality {
                 console.log('Camera change detected:', data.cameras)
                 this.emit('cameraChange', data.cameras)
             }
+            // Calibration events
+            if (data.type == 'calibration_progress') {
+                this.emit('calibrationProgress', data.data)
+            }
+            if (data.type == 'calibration_complete') {
+                this.emit('calibrationComplete', data.data)
+            }
+            if (data.type == 'calibration_error') {
+                this.emit('calibrationError', data.data)
+            }
         }
 
         this.ws.onerror = (error) => {

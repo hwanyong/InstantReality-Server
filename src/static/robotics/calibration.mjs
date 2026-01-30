@@ -138,6 +138,22 @@ async function initWebRTC() {
             await ir.reconnect()
         })
 
+        // Calibration event listeners
+        ir.on('calibrationProgress', (data) => {
+            console.log('Calibration progress:', data)
+            updateProgress(data)
+        })
+
+        ir.on('calibrationComplete', (data) => {
+            console.log('Calibration complete:', data)
+            onCalibrationComplete(data)
+        })
+
+        ir.on('calibrationError', (data) => {
+            console.log('Calibration error:', data)
+            onCalibrationError(data)
+        })
+
         // Connect with role-based camera selection
         await ir.connect({
             roles: CAMERA_ROLES
