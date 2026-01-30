@@ -126,7 +126,8 @@ export class InstantReality {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 sdp: pc.localDescription.sdp,
-                type: pc.localDescription.type
+                type: pc.localDescription.type,
+                roles: options.roles || []
             })
         })
 

@@ -343,12 +343,15 @@ async def handle_offer(request):
     params = await request.json()
     offer = RTCSessionDescription(sdp=params["sdp"], type=params["type"])
     
+    # Support role-based camera selection (e.g., ["topview", "quarterview"])
+    requested_roles = params.get("roles", [])
+    
     pc = RTCPeerConnection()
     pcs.add(pc)
     pc_id = str(id(pc))
     active_tracks[pc_id] = {}
     
-    logger.info(f"New WebRTC connection: {pc_id}")
+    logger.info(f"New WebRTC connection: {pc_id}, roles: {requested_roles}")
     
     @pc.on("connectionstatechange")
     async def on_connectionstatechange():
@@ -358,23 +361,35 @@ async def handle_offer(request):
             pcs.discard(pc)
             active_tracks.pop(pc_id, None)
     
-    # IMPORTANT: Set remote description FIRST to use existing transceivers
-    await pc.setRemoteDescription(offer)
+    # Determine which cameras to stream
+    if requested_roles:
+        # Role-based selection for calibration
+        camera_indices = []
+        for role in requested_roles:
+            idx = get_index_by_role(role)
+            if idx is not None:
+                camera_indices.append(idx)
+                logger.info(f"Role '{role}' -> camera {idx}")
+            else:
+                logger.warning(f"Role '{role}' not found")
+    else:
+        # Broadcast mode: all active cameras
+        camera_indices = get_active_cameras()
     
-    # Get active cameras
-    camera_indices = get_active_cameras()
     if not camera_indices:
         logger.warning("No cameras running for WebRTC")
     
-    # Force H.264 codec
+    # Force H.264 codec for Safari support
     h264_codecs = []
     try:
         capabilities = RTCRtpSender.getCapabilities("video")
         h264_codecs = [c for c in capabilities.codecs if "H264" in c.mimeType]
+        if h264_codecs:
+            logger.info(f"Enforcing H.264 codec")
     except Exception as e:
         logger.debug(f"H.264 not available: {e}")
     
-    # Add video tracks - transceivers now exist from the offer
+    # ORIGINAL ORDER: Add tracks FIRST
     for idx in camera_indices:
         try:
             track = OpenCVVideoCapture(camera_index=idx, options={"width": 1920, "height": 1080})
@@ -390,6 +405,8 @@ async def handle_offer(request):
         except Exception as e:
             logger.error(f"Failed to add track for camera {idx}: {e}")
     
+    # THEN setRemoteDescription (original server.py pattern)
+    await pc.setRemoteDescription(offer)
     answer = await pc.createAnswer()
     await pc.setLocalDescription(answer)
     

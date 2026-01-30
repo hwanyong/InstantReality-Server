@@ -15,15 +15,20 @@ import { InstantReality } from '/sdk/instant-reality.mjs'
 const API_BASE = '/api'
 
 // WebRTC Client
+// Stream all 4 cameras, but analysis uses only TopView + QuarterView
 const rtcClient = new InstantReality({
     serverUrl: window.location.origin,
-    maxCameras: 1
+    maxCameras: 4
 })
+
+// Camera role names (order matches server camera indices)
+const CAMERA_ROLES = ['TopView', 'QuarterView', 'RightRobot', 'LeftRobot']
+const CALIBRATION_CAMERAS = ['TopView', 'QuarterView']
 
 // State
 let isCalibrating = false
 let calibrationData = null
-let videoElement = null
+let videoElements = []
 let arCanvas = null
 let workspaceCanvas = null
 
@@ -88,7 +93,13 @@ function cacheElements() {
 }
 
 function setupCanvases() {
-    videoElement = document.getElementById('camera-video')
+    // Get all 4 video elements
+    videoElements = [
+        document.getElementById('camera-0'),
+        document.getElementById('camera-1'),
+        document.getElementById('camera-2'),
+        document.getElementById('camera-3')
+    ]
     arCanvas = document.getElementById('ar-overlay')
     workspaceCanvas = document.getElementById('workspace-canvas')
 
@@ -107,10 +118,10 @@ async function connectWebRTC() {
 
         // Setup event handlers before connecting
         rtcClient.on('track', (track, cameraIndex) => {
-            console.log(`Received video track ${cameraIndex}`)
-            if (videoElement && track.kind == 'video') {
-                videoElement.srcObject = new MediaStream([track])
-                videoElement.play().catch(e => console.warn('Video autoplay blocked:', e))
+            console.log(`Received video track ${cameraIndex}${CAMERA_ROLES[cameraIndex] ? ` (${CAMERA_ROLES[cameraIndex]})` : ''}`)
+            if (track.kind == 'video' && videoElements[cameraIndex]) {
+                videoElements[cameraIndex].srcObject = new MediaStream([track])
+                videoElements[cameraIndex].play().catch(e => console.warn('Video autoplay blocked:', e))
             }
         })
 
@@ -136,6 +147,7 @@ async function connectWebRTC() {
             handleMessage({ data: JSON.stringify({ type: 'camera_change', cameras }) })
         })
 
+        // Connect to all cameras (no roles filter)
         await rtcClient.connect()
     } catch (e) {
         console.error('WebRTC connection failed:', e)

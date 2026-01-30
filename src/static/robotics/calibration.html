@@ -178,12 +178,32 @@
             <section>
                 <!-- Camera View -->
                 <div class="video-section">
-                    <h2>📹 Camera View</h2>
-                    <div class="video-container">
-                        <video id="camera-video" width="800" height="450" autoplay playsinline muted></video>
-                        <canvas id="ar-overlay" width="800" height="450"></canvas>
+                    <h2>📹 Camera View <span style="font-size: 12px; color: var(--text-secondary);">(Calibration uses
+                            TopView + QuarterView)</span></h2>
+                    <div class="video-grid-4" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                        <div class="video-wrapper">
+                            <label style="font-size: 11px; color: var(--accent);">🎯 TopView</label>
+                            <video id="camera-0" width="390" height="220" autoplay playsinline muted
+                                style="border: 2px solid var(--accent); border-radius: 4px;"></video>
+                        </div>
+                        <div class="video-wrapper">
+                            <label style="font-size: 11px; color: var(--accent);">🎯 QuarterView</label>
+                            <video id="camera-1" width="390" height="220" autoplay playsinline muted
+                                style="border: 2px solid var(--accent); border-radius: 4px;"></video>
+                        </div>
+                        <div class="video-wrapper">
+                            <label style="font-size: 11px; color: var(--text-secondary);">RightRobot</label>
+                            <video id="camera-2" width="390" height="220" autoplay playsinline muted
+                                style="border: 1px solid var(--border); border-radius: 4px;"></video>
+                        </div>
+                        <div class="video-wrapper">
+                            <label style="font-size: 11px; color: var(--text-secondary);">LeftRobot</label>
+                            <video id="camera-3" width="390" height="220" autoplay playsinline muted
+                                style="border: 1px solid var(--border); border-radius: 4px;"></video>
+                        </div>
                     </div>
-                    <div class="video-controls">
+                    <canvas id="ar-overlay" width="800" height="225" style="display: none;"></canvas>
+                    <div class="video-controls" style="margin-top: 8px;">
                         <button id="capture-btn" class="btn">📷 Capture</button>
                         <button id="detect-base-btn" class="btn">🔍 Detect Robot Base</button>
                         <button id="detect-gripper-btn" class="btn">✋ Detect Gripper</button>
