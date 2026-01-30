@@ -6,8 +6,10 @@
  * - Workspace visualization
  * - Calibration data management
  * - Real-time progress updates
- * - Camera streaming via REST API (stable, no WebRTC issues)
+ * - Camera streaming via WebRTC (InstantReality SDK)
  */
+
+import InstantReality from '../sdk/instant-reality.mjs'
 
 // Configuration
 const API_BASE = '/api'
@@ -19,11 +21,12 @@ const CALIBRATION_CAMERAS = ['TopView', 'QuarterView']
 // State
 let isCalibrating = false
 let calibrationData = null
-let canvasElements = []
+let videoElements = []
 let arCanvas = null
 let workspaceCanvas = null
 let roleMapping = {}
-let refreshInterval = null
+let ir = null  // InstantReality instance
+let isRobotConnected = false
 
 // DOM Elements
 const elements = {
@@ -46,13 +49,11 @@ async function init() {
     // Cache DOM elements
     cacheElements()
 
-    // Setup canvases
-    setupCanvases()
+    // Setup video elements for WebRTC
+    setupVideoElements()
 
-    // Load role mapping and start camera refresh
-    await loadRoleMapping()
-    await refreshAllCameras()
-    startAutoRefresh()
+    // Initialize WebRTC streaming
+    await initWebRTC()
 
     // Load existing calibration
     await loadCalibration()
@@ -87,9 +88,9 @@ function cacheElements() {
     }
 }
 
-function setupCanvases() {
-    // Get all 4 canvas elements (using canvas for REST API approach)
-    canvasElements = [
+function setupVideoElements() {
+    // Get all 4 video elements for WebRTC streaming
+    videoElements = [
         document.getElementById('camera-0'),
         document.getElementById('camera-1'),
         document.getElementById('camera-2'),
@@ -104,6 +105,50 @@ function setupCanvases() {
         workspaceCanvas.width = rect.width
         workspaceCanvas.height = rect.height
         drawWorkspaceGrid()
+    }
+}
+
+// Initialize WebRTC streaming using InstantReality SDK
+async function initWebRTC() {
+    try {
+        updateConnectionStatus(false, 'Connecting...')
+
+        ir = new InstantReality()
+
+        // Handle incoming video tracks
+        ir.on('track', (track, index) => {
+            console.log(`Track ${index} received`)
+            if (videoElements[index]) {
+                videoElements[index].srcObject = new MediaStream([track])
+            }
+        })
+
+        ir.on('connected', () => {
+            updateConnectionStatus(true, 'WebRTC Connected')
+            console.log('WebRTC connected')
+        })
+
+        ir.on('disconnected', () => {
+            updateConnectionStatus(false, 'Disconnected')
+            console.log('WebRTC disconnected')
+        })
+
+        ir.on('cameraChange', async (cameras) => {
+            console.log('Camera change detected:', cameras)
+            await ir.reconnect()
+        })
+
+        // Connect with role-based camera selection
+        await ir.connect({
+            roles: CAMERA_ROLES
+        })
+
+        // Also load role mapping for calibration API
+        await loadRoleMapping()
+
+    } catch (err) {
+        console.error('WebRTC init failed:', err)
+        updateConnectionStatus(false, 'WebRTC Error')
     }
 }
 
@@ -128,58 +173,26 @@ async function loadRoleMapping() {
     }
 }
 
-// Capture frame from camera via REST API
-async function captureFrame(cameraRole, canvas) {
-    if (!canvas) return
-
-    const idx = roleMapping[cameraRole]
-    if (idx === undefined) {
-        console.warn(`Role ${cameraRole} not found in mapping`)
-        return
-    }
-
-    try {
-        const res = await fetch(`${API_BASE}/capture?camera=${idx}`)
-        const data = await res.json()
-
-        if (data.image) {
-            const img = new Image()
-            img.onload = () => {
-                canvas.width = img.width
-                canvas.height = img.height
-                const ctx = canvas.getContext('2d')
-                ctx.drawImage(img, 0, 0)
-            }
-            img.src = `data:image/jpeg;base64,${data.image}`
-        }
-    } catch (err) {
-        console.warn(`Failed to capture ${cameraRole}:`, err)
-    }
+// Deprecated: captureFrame - now using WebRTC streaming
+// Kept for backward compatibility with capture button
+async function captureFrame(cameraRole, videoElement) {
+    // For capture button, we can grab from video element
+    if (!videoElement) return null
+    return videoElement  // Return video element for frame capture
 }
 
-// Refresh all cameras
-async function refreshAllCameras() {
-    await Promise.all([
-        captureFrame('TopView', canvasElements[0]),
-        captureFrame('QuarterView', canvasElements[1]),
-        captureFrame('RightRobot', canvasElements[2]),
-        captureFrame('LeftRobot', canvasElements[3])
-    ])
+// Deprecated: refreshAllCameras - WebRTC handles streaming automatically
+function refreshAllCameras() {
+    // No-op: WebRTC provides real-time streaming
 }
 
-// Auto-refresh cameras every 500ms
+// Deprecated: startAutoRefresh - WebRTC handles streaming automatically
 function startAutoRefresh() {
-    if (refreshInterval) clearInterval(refreshInterval)
-    refreshInterval = setInterval(refreshAllCameras, 500)
-    console.log('Camera auto-refresh started (500ms)')
+    console.log('WebRTC streaming active - no polling needed')
 }
 
 function stopAutoRefresh() {
-    if (refreshInterval) {
-        clearInterval(refreshInterval)
-        refreshInterval = null
-        console.log('Camera auto-refresh stopped')
-    }
+    // No-op: WebRTC cleanup handled by ir.disconnect()
 }
 
 function updateConnectionStatus(connected, message = null) {
@@ -226,6 +239,23 @@ function setupEventListeners() {
     // Detection buttons
     document.getElementById('detect-base-btn')?.addEventListener('click', detectRobotBase)
     document.getElementById('detect-gripper-btn')?.addEventListener('click', detectGripper)
+
+    // Robot control buttons
+    document.getElementById('robot-connect-btn')?.addEventListener('click', connectRobot)
+    document.getElementById('robot-disconnect-btn')?.addEventListener('click', disconnectRobot)
+    document.getElementById('go-home-btn')?.addEventListener('click', goHome)
+    document.getElementById('go-zero-btn')?.addEventListener('click', goToZero)
+
+    // Motion speed slider
+    const speedSlider = document.getElementById('motion-speed')
+    const speedValue = document.getElementById('speed-value')
+    speedSlider?.addEventListener('input', (e) => {
+        const val = e.target.value
+        speedValue.textContent = `${val}초`
+    })
+    speedSlider?.addEventListener('change', (e) => {
+        setMotionSpeed(parseFloat(e.target.value))
+    })
 
     // Grid preview
     document.getElementById('test-grid-btn')?.addEventListener('click', previewGridPoints)
@@ -677,5 +707,122 @@ async function verifyCalibration() {
         }
     } catch (e) {
         updateCalStatus(`❌ Verification failed: ${e.message}`)
+    }
+}
+
+// =============================================================================
+// Robot Control Functions
+// =============================================================================
+
+function updateRobotStatus(connected, message = null) {
+    const statusEl = document.getElementById('robot-status')
+    if (statusEl) {
+        statusEl.textContent = message || (connected ? 'Connected' : 'Disconnected')
+        statusEl.className = `calibration-status ${connected ? 'active' : ''}`
+    }
+
+    // Update button states
+    const connectBtn = document.getElementById('robot-connect-btn')
+    const disconnectBtn = document.getElementById('robot-disconnect-btn')
+    const homeBtn = document.getElementById('go-home-btn')
+    const zeroBtn = document.getElementById('go-zero-btn')
+
+    if (connectBtn) connectBtn.disabled = connected
+    if (disconnectBtn) disconnectBtn.disabled = !connected
+    if (homeBtn) homeBtn.disabled = !connected
+    if (zeroBtn) zeroBtn.disabled = !connected
+
+    isRobotConnected = connected
+}
+
+async function connectRobot() {
+    updateRobotStatus(false, 'Connecting...')
+
+    try {
+        const response = await fetch(`${API_BASE}/robot/connect`, {
+            method: 'POST'
+        })
+        const result = await response.json()
+
+        if (result.success) {
+            updateRobotStatus(true, `Connected: ${result.port}`)
+            console.log('Robot connected:', result)
+        } else {
+            updateRobotStatus(false, `❌ ${result.error}`)
+        }
+    } catch (e) {
+        updateRobotStatus(false, `❌ ${e.message}`)
+    }
+}
+
+async function disconnectRobot() {
+    try {
+        const response = await fetch(`${API_BASE}/robot/disconnect`, {
+            method: 'POST'
+        })
+        const result = await response.json()
+
+        updateRobotStatus(false, 'Disconnected')
+        console.log('Robot disconnected:', result)
+    } catch (e) {
+        updateRobotStatus(false, `❌ ${e.message}`)
+    }
+}
+
+async function goHome() {
+    if (!isRobotConnected) return
+
+    updateRobotStatus(true, '🏠 Moving to Home...')
+
+    try {
+        const response = await fetch(`${API_BASE}/robot/home`, {
+            method: 'POST'
+        })
+        const result = await response.json()
+
+        if (result.success) {
+            updateRobotStatus(true, '✅ Home position reached')
+            console.log('Go Home result:', result)
+        } else {
+            updateRobotStatus(true, `❌ ${result.error}`)
+        }
+    } catch (e) {
+        updateRobotStatus(true, `❌ ${e.message}`)
+    }
+}
+
+async function goToZero() {
+    if (!isRobotConnected) return
+
+    updateRobotStatus(true, '📐 Moving to Zero...')
+
+    try {
+        const response = await fetch(`${API_BASE}/robot/zero`, {
+            method: 'POST'
+        })
+        const result = await response.json()
+
+        if (result.success) {
+            updateRobotStatus(true, '✅ Zero position reached')
+            console.log('Go Zero result:', result)
+        } else {
+            updateRobotStatus(true, `❌ ${result.error}`)
+        }
+    } catch (e) {
+        updateRobotStatus(true, `❌ ${e.message}`)
+    }
+}
+
+async function setMotionSpeed(duration) {
+    try {
+        const response = await fetch(`${API_BASE}/robot/speed`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ duration: duration })
+        })
+        const result = await response.json()
+        console.log('Motion speed set:', result)
+    } catch (e) {
+        console.error('Failed to set motion speed:', e)
     }
 }

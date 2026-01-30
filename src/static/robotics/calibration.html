@@ -183,23 +183,23 @@
                     <div class="video-grid-4" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
                         <div class="video-wrapper">
                             <label style="font-size: 11px; color: var(--accent);">🎯 TopView</label>
-                            <canvas id="camera-0" width="390" height="220"
-                                style="border: 2px solid var(--accent); border-radius: 4px; background: #000;"></canvas>
+                            <video id="camera-0" autoplay playsinline muted
+                                style="width: 390px; height: 220px; border: 2px solid var(--accent); border-radius: 4px; background: #000; object-fit: cover;"></video>
                         </div>
                         <div class="video-wrapper">
                             <label style="font-size: 11px; color: var(--accent);">🎯 QuarterView</label>
-                            <canvas id="camera-1" width="390" height="220"
-                                style="border: 2px solid var(--accent); border-radius: 4px; background: #000;"></canvas>
+                            <video id="camera-1" autoplay playsinline muted
+                                style="width: 390px; height: 220px; border: 2px solid var(--accent); border-radius: 4px; background: #000; object-fit: cover;"></video>
                         </div>
                         <div class="video-wrapper">
                             <label style="font-size: 11px; color: var(--text-secondary);">RightRobot</label>
-                            <canvas id="camera-2" width="390" height="220"
-                                style="border: 1px solid var(--border); border-radius: 4px; background: #000;"></canvas>
+                            <video id="camera-2" autoplay playsinline muted
+                                style="width: 390px; height: 220px; border: 1px solid var(--border); border-radius: 4px; background: #000; object-fit: cover;"></video>
                         </div>
                         <div class="video-wrapper">
                             <label style="font-size: 11px; color: var(--text-secondary);">LeftRobot</label>
-                            <canvas id="camera-3" width="390" height="220"
-                                style="border: 1px solid var(--border); border-radius: 4px; background: #000;"></canvas>
+                            <video id="camera-3" autoplay playsinline muted
+                                style="width: 390px; height: 220px; border: 1px solid var(--border); border-radius: 4px; background: #000; object-fit: cover;"></video>
                         </div>
                     </div>
                     <canvas id="ar-overlay" width="800" height="225" style="display: none;"></canvas>
@@ -235,6 +235,33 @@
 
             <!-- Right Panel: Calibration Controls -->
             <section class="control-section">
+                <!-- Robot Connection Test -->
+                <div class="control-card">
+                    <h3>🤖 Robot Control</h3>
+                    <p style="font-size: 0.75rem; color: var(--text-secondary); margin-bottom: 12px;">
+                        로봇 연결 및 포지션 제어 테스트
+                    </p>
+
+                    <div class="calibration-status" id="robot-status">Disconnected</div>
+
+                    <div class="btn-group">
+                        <button id="robot-connect-btn" class="btn-primary">🔌 Connect</button>
+                        <button id="robot-disconnect-btn" class="btn-danger" disabled>⛔ Disconnect</button>
+                    </div>
+                    <div class="btn-group" style="margin-top: 8px;">
+                        <button id="go-home-btn" class="btn" disabled>🏠 Go Home</button>
+                        <button id="go-zero-btn" class="btn" disabled>📐 Go to Zero</button>
+                    </div>
+                    <div class="control-row" style="margin-top: 12px;">
+                        <label style="font-size: 0.75rem; color: var(--text-secondary);">모션 속도</label>
+                        <div style="display: flex; align-items: center; gap: 8px; margin-top: 4px;">
+                            <input type="range" id="motion-speed" min="0.5" max="5" step="0.5" value="3"
+                                style="flex: 1; accent-color: var(--accent);">
+                            <span id="speed-value" style="font-size: 0.85rem; min-width: 35px;">3초</span>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Auto-Calibration -->
                 <div class="control-card">
                     <h3>🎯 Auto-Calibration</h3>

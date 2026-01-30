@@ -28,6 +28,7 @@ from src.camera_manager import get_camera, get_active_cameras, init_cameras, set
 from src.camera_mapping import get_index_by_role, get_available_devices, match_roles, assign_role, VALID_ROLES, get_camera_settings, save_camera_settings, get_all_settings, get_roi_config, save_roi_config
 from src.ai_engine import GeminiBrain
 from src.calibration_api import setup_calibration_routes
+from src.robot_api import setup_robot_routes
 
 if WEBRTC_AVAILABLE:
     from src.webrtc.video_track import OpenCVVideoCapture
@@ -579,6 +580,10 @@ def create_app():
     # Calibration API routes
     setup_calibration_routes(app, camera_manager=None)
     logger.info("Calibration API routes registered")
+    
+    # Robot Control API routes
+    setup_robot_routes(app)
+    logger.info("Robot API routes registered")
     
     # Index redirect
     async def index_redirect(request):
