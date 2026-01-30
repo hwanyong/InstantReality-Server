@@ -4,5 +4,51 @@
     "\\\\?\\usb#vid_046d&pid_085c&mi_00#6&1cc9c881&0&0000#{65e8773d-8f56-11d0-a3b9-00a0c9223196}\\global": "LeftRobot",
     "\\\\?\\usb#vid_32e6&pid_9221&mi_00#7&156e46aa&0&0000#{65e8773d-8f56-11d0-a3b9-00a0c9223196}\\global": "TopView",
     "\\\\?\\usb#vid_32e6&pid_9221&mi_00#8&2b1a2f5d&0&0000#{65e8773d-8f56-11d0-a3b9-00a0c9223196}\\global": "QuarterView"
+  },
+  "camera_settings": {
+    "TopView": {
+      "focus": {
+        "auto": true,
+        "value": 0
+      },
+      "exposure": {
+        "auto": false,
+        "value": -5,
+        "target_brightness": 128
+      }
+    },
+    "QuarterView": {
+      "focus": {
+        "auto": true,
+        "value": 0
+      },
+      "exposure": {
+        "auto": false,
+        "value": -5,
+        "target_brightness": 128
+      }
+    },
+    "RightRobot": {
+      "focus": {
+        "auto": false,
+        "value": 27
+      },
+      "exposure": {
+        "auto": false,
+        "value": -5,
+        "target_brightness": 128
+      }
+    },
+    "LeftRobot": {
+      "focus": {
+        "auto": false,
+        "value": 27
+      },
+      "exposure": {
+        "auto": false,
+        "value": -5,
+        "target_brightness": 128
+      }
+    }
   }
 }
