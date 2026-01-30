@@ -415,3 +415,34 @@ async def handle_grasp_with_verification(request):
             'error': str(e)
         }, status=500)
 
+
+async def handle_phase_status(request):
+    """Get current calibration phase status."""
+    global _calibration_task, _calibrator
+    
+    is_running = _calibration_task is not None and not _calibration_task.done()
+    
+    phase_results = []
+    current_phase = 0
+    phase_name = "Not started"
+    
+    if _calibrator and hasattr(_calibrator, '_phase_results'):
+        phase_results = [
+            {
+                'phase': r.phase,
+                'name': r.name,
+                'success': r.success,
+                'error': r.error
+            }
+            for r in _calibrator._phase_results
+        ]
+        current_phase = len(phase_results)
+        if phase_results:
+            phase_name = phase_results[-1]['name']
+    
+    return web.json_response({
+        'is_running': is_running,
+        'current_phase': current_phase,
+        'phase_name': phase_name,
+        'phase_results': phase_results
+    })
