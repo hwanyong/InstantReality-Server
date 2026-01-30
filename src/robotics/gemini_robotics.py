@@ -283,3 +283,100 @@ Find and analyze: {target_object}"""
         import cv2
         _, buffer = cv2.imencode('.jpg', frame_bgr, [cv2.IMWRITE_JPEG_QUALITY, 85])
         return buffer.tobytes()
+    
+    async def verify_action_success(
+        self,
+        before_image: bytes,
+        after_image: bytes,
+        expected_change: str
+    ) -> Dict:
+        """
+        Visually verify if action was successful by comparing before/after images.
+        
+        Args:
+            before_image: Image before action (JPEG bytes)
+            after_image: Image after action (JPEG bytes)
+            expected_change: Description of expected change
+        
+        Returns:
+            {"success": bool, "confidence": float, "reason": str, "detected_change": str}
+        """
+        from google.genai import types
+        
+        prompt = f"""You are a robot action verification system.
+
+Compare the two images (BEFORE and AFTER) and determine if the expected action was successful.
+
+Expected change: "{expected_change}"
+
+Output Requirements:
+- Return ONLY valid JSON
+- Format: {{"success": true/false, "confidence": 0.0-1.0, "reason": "explanation", "detected_change": "what changed"}}
+
+CRITICAL: If the object position hasn't changed significantly, return success=false."""
+
+        config = types.GenerateContentConfig(
+            temperature=0.2,
+            thinking_config=types.ThinkingConfig(thinking_budget=512)
+        )
+        
+        response = self.client.models.generate_content(
+            model=self.MODEL_ID,
+            contents=[
+                "Image 1 (BEFORE):",
+                types.Part.from_bytes(data=before_image, mime_type="image/jpeg"),
+                "Image 2 (AFTER):",
+                types.Part.from_bytes(data=after_image, mime_type="image/jpeg"),
+                prompt
+            ],
+            config=config
+        )
+        
+        return self._parse_json_response(response.text)
+    
+    async def analyze_with_self_correction(
+        self,
+        image_bytes: bytes,
+        target_object: str,
+        context: str = ""
+    ) -> Dict:
+        """
+        Analyze with Code Execution enabled for self-correction.
+        
+        Args:
+            image_bytes: JPEG image bytes
+            target_object: Object to find
+            context: Additional context
+        
+        Returns:
+            {"point": [y, x], "label": str, "corrected": bool, "correction_reason": str}
+        """
+        from google.genai import types
+        
+        prompt = f"""You are a robot vision system with self-correction capability.
+
+Find: "{target_object}"
+{f'Context: {context}' if context else ''}
+
+Use code execution to validate coordinates if needed.
+
+Output: {{"point": [y, x], "label": "name", "corrected": true/false, "correction_reason": "reason"}}
+Coordinates: 0-1000 normalized"""
+
+        config = types.GenerateContentConfig(
+            temperature=0.3,
+            thinking_config=types.ThinkingConfig(thinking_budget=1024),
+            tools=[types.Tool(code_execution=types.ToolCodeExecution())]
+        )
+        
+        response = self.client.models.generate_content(
+            model=self.MODEL_ID,
+            contents=[
+                types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg"),
+                prompt
+            ],
+            config=config
+        )
+        
+        return self._parse_json_response(response.text)
+
