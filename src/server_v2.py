@@ -47,6 +47,22 @@ active_tracks = {}  # {pc_id: {camera_index: track}}
 ws_clients = set()  # WebSocket clients
 
 
+class CameraAdapter:
+    """Adapter to provide capture() interface for calibration API."""
+    
+    def __init__(self, camera_index=0):
+        self.camera_index = camera_index
+        self.resolution = [1920, 1080]
+    
+    def capture(self):
+        """Capture high-res frame from camera."""
+        cam = get_camera(self.camera_index)
+        if cam is None:
+            return None
+        high_res, _ = cam.get_frames()
+        return high_res
+
+
 # =============================================================================
 # API Handlers
 # =============================================================================
@@ -435,6 +451,17 @@ async def handle_websocket(request):
     return ws
 
 
+async def ws_broadcast(message):
+    """Broadcast message to all WebSocket clients."""
+    for ws in list(ws_clients):
+        if not ws.closed:
+            try:
+                await ws.send_json(message)
+            except Exception as e:
+                logger.debug(f"Failed to send to WebSocket: {e}")
+                ws_clients.discard(ws)
+
+
 async def handle_pause_camera(request):
     """POST /pause_camera - Pause/resume camera track"""
     data = await request.json()
@@ -534,6 +561,9 @@ def create_app():
         )
     })
     
+    # Register WebSocket broadcast helper on app
+    app.ws_broadcast = ws_broadcast
+    
     # API routes
     api_routes = [
         # Scene API
@@ -577,8 +607,9 @@ def create_app():
         app.router.add_static('/sdk/', sdk_path)
         logger.info(f"Serving SDK from: {sdk_path}")
     
-    # Calibration API routes
-    setup_calibration_routes(app, camera_manager=None)
+    # Calibration API routes - use TopView camera by default
+    topview_idx = get_index_by_role("TopView") or 0
+    setup_calibration_routes(app, camera_manager=CameraAdapter(topview_idx))
     logger.info("Calibration API routes registered")
     
     # Robot Control API routes
