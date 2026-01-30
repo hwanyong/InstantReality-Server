@@ -358,7 +358,10 @@ async def handle_offer(request):
             pcs.discard(pc)
             active_tracks.pop(pc_id, None)
     
-    # Add video tracks for active cameras
+    # IMPORTANT: Set remote description FIRST to use existing transceivers
+    await pc.setRemoteDescription(offer)
+    
+    # Get active cameras
     camera_indices = get_active_cameras()
     if not camera_indices:
         logger.warning("No cameras running for WebRTC")
@@ -371,6 +374,7 @@ async def handle_offer(request):
     except Exception as e:
         logger.debug(f"H.264 not available: {e}")
     
+    # Add video tracks - transceivers now exist from the offer
     for idx in camera_indices:
         try:
             track = OpenCVVideoCapture(camera_index=idx, options={"width": 1920, "height": 1080})
@@ -386,7 +390,6 @@ async def handle_offer(request):
         except Exception as e:
             logger.error(f"Failed to add track for camera {idx}: {e}")
     
-    await pc.setRemoteDescription(offer)
     answer = await pc.createAnswer()
     await pc.setLocalDescription(answer)
     
