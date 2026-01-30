@@ -78,6 +78,45 @@
             padding: 20px;
             color: var(--text-secondary);
         }
+
+        /* ROI Overlay */
+        .roi-overlay {
+            position: absolute;
+            border: 2px dashed rgba(88, 166, 255, 0.8);
+            background: rgba(88, 166, 255, 0.1);
+            pointer-events: none;
+            z-index: 5;
+        }
+
+        /* Analysis mode buttons */
+        .mode-buttons {
+            display: flex;
+            gap: 8px;
+            margin-top: 12px;
+        }
+
+        .mode-buttons button {
+            flex: 1;
+        }
+
+        .btn-precision {
+            background: linear-gradient(135deg, #f093fb, #f5576c);
+            color: white;
+            border: none;
+            padding: 10px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 500;
+        }
+
+        .btn-precision:hover {
+            opacity: 0.9;
+        }
+
+        .btn-precision:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
     </style>
 </head>
 
@@ -107,9 +146,10 @@
                         <canvas id="quarterview-canvas"></canvas>
                     </div>
                 </div>
-                <div class="video-controls" style="margin-top: 12px;">
-                    <button id="scan-btn" class="btn-primary" style="flex: 1;">🔄 Scan Scene</button>
-                    <button id="refresh-btn" class="btn">📷 Refresh View</button>
+                <div class="mode-buttons">
+                    <button id="scan-btn" class="btn-primary">⚡ Quick Scan</button>
+                    <button id="precision-btn" class="btn-precision">🎯 Precision Scan</button>
+                    <button id="refresh-btn" class="btn">📷 Refresh</button>
                 </div>
             </section>
 
@@ -139,6 +179,7 @@
 
         // UI elements
         const scanBtn = document.getElementById('scan-btn')
+        const precisionBtn = document.getElementById('precision-btn')
         const refreshBtn = document.getElementById('refresh-btn')
         const scanStatus = document.getElementById('scan-status')
         const objectCount = document.getElementById('object-count')
@@ -146,7 +187,8 @@
         const jsonOutput = document.getElementById('json-output')
 
         let currentObjects = []
-        let roleMapping = {}  // Dynamic role to index mapping
+        let roleMapping = {}
+        let roiConfig = null
 
         // Load role mapping from server
         async function loadRoleMapping() {
@@ -155,7 +197,6 @@
                 const data = await res.json()
                 roleMapping = {}
 
-                // Build roleMapping: { 'TopView': 2, 'QuarterView': 3, ... }
                 for (const [role, info] of Object.entries(data.role_mapping || {})) {
                     if (info && info.index !== undefined) {
                         roleMapping[role] = info.index
@@ -165,6 +206,46 @@
             } catch (err) {
                 console.error('Failed to load role mapping:', err)
             }
+        }
+
+        // Load ROI configuration
+        async function loadROIConfig() {
+            try {
+                const res = await fetch(`${API_BASE}/api/roi`)
+                roiConfig = await res.json()
+                console.log('ROI config loaded:', roiConfig)
+                drawROIOverlay()
+            } catch (err) {
+                console.error('Failed to load ROI config:', err)
+            }
+        }
+
+        // Draw ROI overlay on topview
+        function drawROIOverlay() {
+            if (!roiConfig || !topviewCanvas.width) return
+
+            const ctx = topviewOverlay.getContext('2d')
+            topviewOverlay.width = topviewCanvas.width
+            topviewOverlay.height = topviewCanvas.height
+
+            const scaleX = topviewCanvas.width / 1000
+            const scaleY = topviewCanvas.height / 1000
+
+            const x = roiConfig.xmin * scaleX
+            const y = roiConfig.ymin * scaleY
+            const w = (roiConfig.xmax - roiConfig.xmin) * scaleX
+            const h = (roiConfig.ymax - roiConfig.ymin) * scaleY
+
+            // Draw ROI border
+            ctx.strokeStyle = 'rgba(88, 166, 255, 0.8)'
+            ctx.lineWidth = 2
+            ctx.setLineDash([8, 4])
+            ctx.strokeRect(x, y, w, h)
+            ctx.setLineDash([])
+
+            // Fill with semi-transparent
+            ctx.fillStyle = 'rgba(88, 166, 255, 0.05)'
+            ctx.fillRect(x, y, w, h)
         }
 
         // Capture and display camera frame
@@ -181,6 +262,13 @@
                     canvas.width = img.width
                     canvas.height = img.height
                     ctx.drawImage(img, 0, 0)
+                    // Redraw overlays after canvas resize
+                    if (cameraRole === 'TopView') {
+                        drawROIOverlay()
+                        if (currentObjects.length) {
+                            drawBoundingBoxes(currentObjects)
+                        }
+                    }
                 }
                 img.src = `data:image/jpeg;base64,${data.image}`
             }
@@ -200,7 +288,8 @@
             topviewOverlay.width = topviewCanvas.width
             topviewOverlay.height = topviewCanvas.height
 
-            ctx.clearRect(0, 0, topviewOverlay.width, topviewOverlay.height)
+            // First draw ROI
+            drawROIOverlay()
 
             const scaleX = topviewOverlay.width / 1000
             const scaleY = topviewOverlay.height / 1000
@@ -215,17 +304,29 @@
                 const h = (ymax - ymin) * scaleY
 
                 // Box
-                ctx.strokeStyle = '#58a6ff'
+                ctx.strokeStyle = obj.point ? '#10b981' : '#58a6ff'
                 ctx.lineWidth = 2
                 ctx.strokeRect(x, y, w, h)
 
+                // Draw center point if available (precision mode)
+                if (obj.point) {
+                    const [py, px] = obj.point
+                    const cx = px * scaleX
+                    const cy = py * scaleY
+                    ctx.beginPath()
+                    ctx.arc(cx, cy, 5, 0, Math.PI * 2)
+                    ctx.fillStyle = '#f5576c'
+                    ctx.fill()
+                }
+
                 // Label background
-                ctx.fillStyle = 'rgba(88, 166, 255, 0.8)'
-                ctx.fillRect(x, y - 20, ctx.measureText(obj.label).width + 10, 20)
+                ctx.font = '12px Inter, sans-serif'
+                const labelWidth = ctx.measureText(obj.label).width + 10
+                ctx.fillStyle = obj.point ? 'rgba(16, 185, 129, 0.9)' : 'rgba(88, 166, 255, 0.8)'
+                ctx.fillRect(x, y - 20, labelWidth, 20)
 
                 // Label text
                 ctx.fillStyle = '#fff'
-                ctx.font = '12px Inter, sans-serif'
                 ctx.fillText(obj.label, x + 5, y - 6)
             })
         }
@@ -235,25 +336,31 @@
             objectList.innerHTML = objects.map((obj, i) => `
                 <div class="object-item">
                     <span class="label">${i + 1}. ${obj.label}</span>
-                    <span class="strategy">${obj.grasp_strategy || '-'}</span>
+                    <span class="strategy">${obj.point ? '🎯' : ''} ${obj.grasp_strategy || '-'}</span>
                 </div>
             `).join('')
 
             objectCount.textContent = `${objects.length} object(s) detected`
         }
 
-        // Scan scene
-        async function scanScene() {
+        // Scan scene (quick or precision mode)
+        async function scanScene(precision = false) {
             scanBtn.disabled = true
-            scanStatus.textContent = '● Scanning...'
+            precisionBtn.disabled = true
+            scanStatus.textContent = precision ? '● Precision Scanning...' : '● Quick Scanning...'
             scanStatus.classList.add('loading')
 
             await refreshViews()
 
-            const res = await fetch(`${API_BASE}/api/scene/init`, { method: 'POST' })
+            const url = precision
+                ? `${API_BASE}/api/scene/init?precision=true`
+                : `${API_BASE}/api/scene/init`
+
+            const res = await fetch(url, { method: 'POST' })
             const data = await res.json()
 
             scanBtn.disabled = false
+            precisionBtn.disabled = false
             scanStatus.classList.remove('loading')
 
             if (data.error) {
@@ -263,7 +370,8 @@
             }
 
             currentObjects = data.objects || []
-            scanStatus.textContent = '● Scanned'
+            const mode = data.analysis_mode === 'precision' ? '🎯 Precision' : '⚡ Quick'
+            scanStatus.textContent = `● ${mode} - ${currentObjects.length} objects`
 
             renderObjectList(currentObjects)
             drawBoundingBoxes(currentObjects)
@@ -271,12 +379,14 @@
         }
 
         // Event listeners
-        scanBtn.addEventListener('click', scanScene)
+        scanBtn.addEventListener('click', () => scanScene(false))
+        precisionBtn.addEventListener('click', () => scanScene(true))
         refreshBtn.addEventListener('click', refreshViews)
 
         // Initial load
         async function init() {
             await loadRoleMapping()
+            await loadROIConfig()
             await refreshViews()
         }
         init()

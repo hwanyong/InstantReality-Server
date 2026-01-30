@@ -9,6 +9,81 @@ from google.genai import types
 
 load_dotenv()
 
+
+class ROIManager:
+    """Manages Region of Interest cropping and coordinate transformation"""
+    
+    def __init__(self, roi_config=None):
+        if roi_config is None:
+            roi_config = {}
+        self.ymin = roi_config.get("ymin", 0)
+        self.xmin = roi_config.get("xmin", 0)
+        self.ymax = roi_config.get("ymax", 1000)
+        self.xmax = roi_config.get("xmax", 1000)
+        self.roi_width = self.xmax - self.xmin
+        self.roi_height = self.ymax - self.ymin
+    
+    def crop_roi(self, frame):
+        """Crop ROI region from original frame"""
+        h, w = frame.shape[:2]
+        y1 = int(self.ymin / 1000 * h)
+        x1 = int(self.xmin / 1000 * w)
+        y2 = int(self.ymax / 1000 * h)
+        x2 = int(self.xmax / 1000 * w)
+        return frame[y1:y2, x1:x2].copy()
+    
+    def crop_box_with_margin(self, frame, box_2d, margin_ratio=0.25):
+        """Crop around a bounding box with margin from original frame"""
+        ymin, xmin, ymax, xmax = box_2d
+        width = xmax - xmin
+        height = ymax - ymin
+        
+        # Add margin
+        new_xmin = max(0, xmin - width * margin_ratio)
+        new_ymin = max(0, ymin - height * margin_ratio)
+        new_xmax = min(1000, xmax + width * margin_ratio)
+        new_ymax = min(1000, ymax + height * margin_ratio)
+        
+        # Convert to pixels
+        h, w = frame.shape[:2]
+        y1 = int(new_ymin / 1000 * h)
+        x1 = int(new_xmin / 1000 * w)
+        y2 = int(new_ymax / 1000 * h)
+        x2 = int(new_xmax / 1000 * w)
+        
+        crop_info = {
+            "crop_box": [new_ymin, new_xmin, new_ymax, new_xmax],
+            "original_box": box_2d
+        }
+        return frame[y1:y2, x1:x2].copy(), crop_info
+    
+    def local_to_roi(self, local_point):
+        """Transform local coordinates (from cropped ROI) to ROI-space coordinates"""
+        local_y, local_x = local_point
+        roi_x = self.xmin + (local_x * self.roi_width / 1000)
+        roi_y = self.ymin + (local_y * self.roi_height / 1000)
+        return [int(roi_y), int(roi_x)]
+    
+    def local_to_global(self, local_point, crop_box):
+        """Transform local coordinates to global frame coordinates"""
+        local_y, local_x = local_point
+        crop_ymin, crop_xmin, crop_ymax, crop_xmax = crop_box
+        crop_w = crop_xmax - crop_xmin
+        crop_h = crop_ymax - crop_ymin
+        
+        global_x = crop_xmin + (local_x * crop_w / 1000)
+        global_y = crop_ymin + (local_y * crop_h / 1000)
+        return [int(global_y), int(global_x)]
+    
+    def transform_box_to_global(self, local_box, crop_box):
+        """Transform a bounding box from local to global coordinates"""
+        local_ymin, local_xmin, local_ymax, local_xmax = local_box
+        
+        top_left = self.local_to_global([local_ymin, local_xmin], crop_box)
+        bottom_right = self.local_to_global([local_ymax, local_xmax], crop_box)
+        
+        return [top_left[0], top_left[1], bottom_right[0], bottom_right[1]]
+
 class GeminiBrain:
     def __init__(self):
         self.api_key = os.environ.get("GEMINI_API_KEY")
@@ -174,6 +249,150 @@ Rules:
         except Exception as e:
             print(f"Scene Scan Error: {e}")
             return {"error": str(e), "objects": []}
+    
+    def scan_scene_with_roi(self, topview_frame, quarterview_frame=None, roi_config=None, precision=False):
+        """
+        2-Pass hierarchical scene analysis with ROI support.
+        
+        Phase 1: Scan ROI-cropped image for all objects
+        Phase 2 (if precision=True): Refine each object with zoomed crop
+        
+        Args:
+            topview_frame: Original full-resolution top-view frame
+            quarterview_frame: Optional quarter-view frame for context
+            roi_config: ROI settings dict {ymin, xmin, ymax, xmax} (0-1000)
+            precision: If True, perform 2-Pass analysis
+            
+        Returns:
+            dict with "objects" list and analysis metadata
+        """
+        if not self.client:
+            return {"error": "AI not initialized", "objects": []}
+        
+        roi_mgr = ROIManager(roi_config)
+        
+        # Crop ROI from original frame
+        roi_frame = roi_mgr.crop_roi(topview_frame)
+        
+        # Resize for Phase 1 analysis (800px width)
+        h, w = roi_frame.shape[:2]
+        target_width = 800
+        new_h = int(target_width * h / w)
+        resized_roi = cv2.resize(roi_frame, (target_width, new_h))
+        
+        # Phase 1: Global scan on ROI
+        print("[Phase 1] Scanning ROI for objects...")
+        phase1_result = self.scan_scene(resized_roi, quarterview_frame)
+        
+        if "error" in phase1_result:
+            return phase1_result
+        
+        objects = phase1_result.get("objects", [])
+        print(f"[Phase 1] Found {len(objects)} objects")
+        
+        # Transform coordinates from ROI-local to global
+        for obj in objects:
+            if "box_2d" in obj:
+                local_box = obj["box_2d"]
+                # Transform from ROI-local (0-1000) to global (0-1000)
+                global_box = roi_mgr.transform_box_to_global(
+                    local_box, 
+                    [roi_mgr.ymin, roi_mgr.xmin, roi_mgr.ymax, roi_mgr.xmax]
+                )
+                obj["box_2d"] = global_box
+                obj["roi_local_box"] = local_box  # Keep original for debugging
+        
+        result = {
+            "objects": objects,
+            "roi_config": roi_config,
+            "analysis_mode": "precision" if precision else "quick"
+        }
+        
+        if not precision:
+            return result
+        
+        # Phase 2: Precision analysis for each object
+        print("[Phase 2] Performing precision analysis...")
+        refined_objects = []
+        
+        for i, obj in enumerate(objects):
+            if "box_2d" not in obj:
+                refined_objects.append(obj)
+                continue
+            
+            print(f"  Refining object {i+1}/{len(objects)}: {obj.get('label', 'unknown')}")
+            
+            # Crop with margin from original full-res frame
+            cropped, crop_info = roi_mgr.crop_box_with_margin(
+                topview_frame, 
+                obj["box_2d"], 
+                margin_ratio=0.25
+            )
+            
+            # Analyze cropped region
+            refined = self._refine_object(cropped, obj.get("label", "object"))
+            
+            if refined and "point" in refined:
+                # Transform point from crop-local to global
+                global_point = roi_mgr.local_to_global(
+                    refined["point"],
+                    crop_info["crop_box"]
+                )
+                obj["point"] = global_point
+                obj["refined_details"] = refined.get("details", "")
+            
+            refined_objects.append(obj)
+        
+        result["objects"] = refined_objects
+        print(f"[Phase 2] Refined {len(refined_objects)} objects")
+        
+        return result
+    
+    def _refine_object(self, cropped_frame, label):
+        """
+        Analyze a cropped region for precise object details.
+        Returns center point and additional details.
+        """
+        if not self.client:
+            return None
+        
+        try:
+            image_bytes = self._encode_frame(cropped_frame)
+            if image_bytes is None:
+                return None
+            
+            prompt = f"""This is a zoomed-in view of a "{label}".
+            
+Task: Provide precise analysis of this object.
+
+Output Format (JSON):
+{{
+    "point": [y, x],
+    "details": "brief description of object properties"
+}}
+
+Rules:
+- "point" is the normalized center coordinates [y, x] (0-1000) of the object.
+- Focus on the main object, ignore background.
+"""
+            
+            response = self.client.models.generate_content(
+                model=self.model_name,
+                contents=[
+                    prompt,
+                    types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg")
+                ],
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    temperature=0.3
+                )
+            )
+            
+            return json.loads(response.text)
+        
+        except Exception as e:
+            print(f"Refine Error for {label}: {e}")
+            return None
 
 if __name__ == "__main__":
     # Simple test

@@ -17,7 +17,7 @@ PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.camera_manager import get_camera, get_active_cameras, init_cameras, set_camera_focus, set_camera_exposure, set_camera_auto_exposure
-from src.camera_mapping import get_index_by_role, get_available_devices, match_roles, assign_role, VALID_ROLES, get_camera_settings, save_camera_settings, get_all_settings
+from src.camera_mapping import get_index_by_role, get_available_devices, match_roles, assign_role, VALID_ROLES, get_camera_settings, save_camera_settings, get_all_settings, get_roi_config, save_roi_config
 from src.ai_engine import GeminiBrain
 
 # Configure logging
@@ -72,8 +72,15 @@ async def handle_capture(request):
 
 
 async def handle_scene_init(request):
-    """POST /api/scene/init - Scan and initialize scene inventory"""
+    """POST /api/scene/init - Scan and initialize scene inventory
+    
+    Query params:
+        precision: If 'true', perform 2-Pass analysis
+    """
     global SCENE_INVENTORY
+    
+    # Check for precision mode
+    precision = request.query.get('precision', 'false').lower() == 'true'
     
     # Get TopView camera
     topview_idx = get_index_by_role("TopView")
@@ -100,12 +107,20 @@ async def handle_scene_init(request):
         quarterview_cam = get_camera(quarterview_idx)
         quarterview_frame, _ = quarterview_cam.get_frames()
     
-    # Call AI scan
-    result = brain.scan_scene(topview_frame, quarterview_frame)
+    # Get ROI config
+    roi_config = get_roi_config()
+    
+    # Call AI scan with ROI support
+    result = brain.scan_scene_with_roi(
+        topview_frame, 
+        quarterview_frame,
+        roi_config=roi_config,
+        precision=precision
+    )
     
     if "error" not in result or result.get("objects"):
         SCENE_INVENTORY = result.get("objects", [])
-        logger.info(f"Scene initialized: {len(SCENE_INVENTORY)} objects detected")
+        logger.info(f"Scene initialized ({result.get('analysis_mode', 'quick')}): {len(SCENE_INVENTORY)} objects detected")
     
     return web.json_response(result)
 
@@ -282,6 +297,24 @@ async def handle_stream(request):
 
 
 # =============================================================================
+# ROI (Region of Interest) API
+# =============================================================================
+
+async def handle_roi_get(request):
+    """GET /api/roi - Get workspace ROI configuration"""
+    roi = get_roi_config()
+    return web.json_response(roi)
+
+
+async def handle_roi_save(request):
+    """POST /api/roi - Save workspace ROI configuration"""
+    data = await request.json()
+    
+    result = save_roi_config(data)
+    return web.json_response({"success": True, "roi": result})
+
+
+# =============================================================================
 # Static Files & App Setup
 # =============================================================================
 
@@ -364,6 +397,9 @@ def create_app():
         web.post('/api/cameras/exposure', handle_cameras_exposure),
         web.get('/api/cameras/settings', handle_cameras_settings_get),
         web.post('/api/cameras/settings', handle_cameras_settings_save),
+        # ROI API
+        web.get('/api/roi', handle_roi_get),
+        web.post('/api/roi', handle_roi_save),
     ]
     
     for route in api_routes:

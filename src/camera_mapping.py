@@ -178,3 +178,33 @@ def get_all_settings():
         }
     
     return result
+
+
+def get_roi_config():
+    """
+    Get workspace ROI configuration.
+    Returns: {ymin, xmin, ymax, xmax} in normalized 0-1000 coordinates
+    """
+    config = load_mapping()
+    default_roi = {"ymin": 0, "xmin": 0, "ymax": 1000, "xmax": 1000}
+    return config.get("workspace_roi", default_roi)
+
+
+def save_roi_config(roi_config):
+    """
+    Save workspace ROI configuration.
+    roi_config: {ymin, xmin, ymax, xmax} in normalized 0-1000 coordinates
+    """
+    config = load_mapping()
+    
+    # Validate and sanitize
+    default_roi = {"ymin": 0, "xmin": 0, "ymax": 1000, "xmax": 1000}
+    validated = {}
+    for key in ["ymin", "xmin", "ymax", "xmax"]:
+        value = roi_config.get(key, default_roi[key])
+        validated[key] = max(0, min(1000, int(value)))
+    
+    config["workspace_roi"] = validated
+    save_mapping(config)
+    
+    return validated

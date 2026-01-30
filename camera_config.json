@@ -50,5 +50,11 @@
         "target_brightness": 128
       }
     }
+  },
+  "workspace_roi": {
+    "ymin": 80,
+    "xmin": 220,
+    "ymax": 920,
+    "xmax": 780
   }
 }
