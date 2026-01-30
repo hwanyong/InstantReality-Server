@@ -9,7 +9,7 @@ Orchestrates end-to-end robot control:
 """
 
 import asyncio
-from typing import Dict, Tuple, Optional
+from typing import Dict, Tuple, Optional, Callable, Awaitable
 from dataclasses import dataclass
 
 from .ik_solver import IKSolver, IKResult
@@ -25,6 +25,8 @@ class MoveResult:
     target_xyz: Tuple[float, float, float]
     ik_result: Optional[IKResult]
     error_message: Optional[str] = None
+    visual_verified: bool = False
+    verification_confidence: float = 0.0
 
 
 class RobotCoordinator:
@@ -192,3 +194,127 @@ class RobotCoordinator:
     def go_home(self):
         """Move robot to home position."""
         self.servo.go_home()
+    
+    async def execute_with_capture(
+        self,
+        camera_fn: Callable[[], bytes],
+        action_fn: Callable[[], Awaitable[MoveResult]],
+        stabilization_delay: float = 0.3
+    ) -> Tuple[MoveResult, bytes, bytes]:
+        """
+        Stop-Capture-Act sequence.
+        
+        1. Capture BEFORE image
+        2. Execute action
+        3. Wait for stabilization
+        4. Capture AFTER image
+        
+        Args:
+            camera_fn: Function that returns JPEG bytes
+            action_fn: Async function that performs robot action
+            stabilization_delay: Wait time after action (seconds)
+        
+        Returns:
+            (MoveResult, before_image, after_image)
+        """
+        # 1. Capture BEFORE
+        before_image = camera_fn()
+        
+        # 2. Execute action
+        result = await action_fn()
+        
+        # 3. Wait for stabilization
+        await asyncio.sleep(stabilization_delay)
+        
+        # 4. Capture AFTER
+        after_image = camera_fn()
+        
+        return result, before_image, after_image
+    
+    async def grasp_with_verification(
+        self,
+        camera_fn: Callable[[], bytes],
+        target_object: str,
+        z_level: str = "low",
+        max_attempts: int = 10
+    ) -> Dict:
+        """
+        Grasp with visual verification and retry.
+        
+        Args:
+            camera_fn: Function that returns JPEG bytes
+            target_object: Object to grasp
+            z_level: Height level
+            max_attempts: Maximum retry attempts (default: 10)
+        
+        Returns:
+            {
+                "success": bool,
+                "attempts": int,
+                "final_result": MoveResult,
+                "verification_log": list
+            }
+        """
+        verification_log = []
+        
+        for attempt in range(1, max_attempts + 1):
+            print(f"[Grasp Attempt {attempt}/{max_attempts}]")
+            
+            # Capture before
+            before_image = camera_fn()
+            
+            # Get target and move
+            result = await self.move_to_gemini_target(
+                before_image, target_object, z_level
+            )
+            
+            if not result.success:
+                verification_log.append({
+                    "attempt": attempt,
+                    "move_success": False,
+                    "error": result.error_message
+                })
+                continue
+            
+            # Wait and capture after
+            await asyncio.sleep(0.3)
+            after_image = camera_fn()
+            
+            # Verify success
+            verification = await self.gemini.verify_action_success(
+                before_image,
+                after_image,
+                f"robot moved to {target_object}"
+            )
+            
+            verified = verification.get("success", False)
+            confidence = verification.get("confidence", 0.0)
+            
+            result.visual_verified = verified
+            result.verification_confidence = confidence
+            
+            print(f"  Visual Verification: success={verified}, confidence={confidence:.2f}")
+            
+            verification_log.append({
+                "attempt": attempt,
+                "move_success": True,
+                "verified": verified,
+                "confidence": confidence,
+                "reason": verification.get("reason", "")
+            })
+            
+            if verified:
+                return {
+                    "success": True,
+                    "attempts": attempt,
+                    "final_result": result,
+                    "verification_log": verification_log
+                }
+        
+        # All attempts failed
+        return {
+            "success": False,
+            "attempts": max_attempts,
+            "final_result": result if 'result' in dir() else None,
+            "verification_log": verification_log
+        }
