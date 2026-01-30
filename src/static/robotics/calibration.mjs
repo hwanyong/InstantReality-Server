@@ -6,31 +6,24 @@
  * - Workspace visualization
  * - Calibration data management
  * - Real-time progress updates
- * - WebRTC video streaming via InstantReality SDK
+ * - Camera streaming via REST API (stable, no WebRTC issues)
  */
-
-import { InstantReality } from '/sdk/instant-reality.mjs'
 
 // Configuration
 const API_BASE = '/api'
 
-// WebRTC Client
-// Stream all 4 cameras, but analysis uses only TopView + QuarterView
-const rtcClient = new InstantReality({
-    serverUrl: window.location.origin,
-    maxCameras: 4
-})
-
-// Camera role names (order matches server camera indices)
+// Camera role names
 const CAMERA_ROLES = ['TopView', 'QuarterView', 'RightRobot', 'LeftRobot']
 const CALIBRATION_CAMERAS = ['TopView', 'QuarterView']
 
 // State
 let isCalibrating = false
 let calibrationData = null
-let videoElements = []
+let canvasElements = []
 let arCanvas = null
 let workspaceCanvas = null
+let roleMapping = {}
+let refreshInterval = null
 
 // DOM Elements
 const elements = {
@@ -56,8 +49,10 @@ async function init() {
     // Setup canvases
     setupCanvases()
 
-    // Connect WebRTC
-    await connectWebRTC()
+    // Load role mapping and start camera refresh
+    await loadRoleMapping()
+    await refreshAllCameras()
+    startAutoRefresh()
 
     // Load existing calibration
     await loadCalibration()
@@ -93,8 +88,8 @@ function cacheElements() {
 }
 
 function setupCanvases() {
-    // Get all 4 video elements
-    videoElements = [
+    // Get all 4 canvas elements (using canvas for REST API approach)
+    canvasElements = [
         document.getElementById('camera-0'),
         document.getElementById('camera-1'),
         document.getElementById('camera-2'),
@@ -112,48 +107,78 @@ function setupCanvases() {
     }
 }
 
-async function connectWebRTC() {
+// Load role mapping from server
+async function loadRoleMapping() {
     try {
-        updateConnectionStatus(false, 'Connecting...')
+        updateConnectionStatus(false, 'Loading...')
+        const res = await fetch(`${API_BASE}/cameras/status`)
+        const data = await res.json()
+        roleMapping = {}
 
-        // Setup event handlers before connecting
-        rtcClient.on('track', (track, cameraIndex) => {
-            console.log(`Received video track ${cameraIndex}${CAMERA_ROLES[cameraIndex] ? ` (${CAMERA_ROLES[cameraIndex]})` : ''}`)
-            if (track.kind == 'video' && videoElements[cameraIndex]) {
-                videoElements[cameraIndex].srcObject = new MediaStream([track])
-                videoElements[cameraIndex].play().catch(e => console.warn('Video autoplay blocked:', e))
+        for (const [role, info] of Object.entries(data.role_mapping || {})) {
+            if (info && info.index !== undefined) {
+                roleMapping[role] = info.index
             }
-        })
+        }
+        console.log('Role mapping loaded:', roleMapping)
+        updateConnectionStatus(true)
+    } catch (err) {
+        console.error('Failed to load role mapping:', err)
+        updateConnectionStatus(false, 'Error')
+    }
+}
 
-        rtcClient.on('connected', () => {
-            updateConnectionStatus(true)
-            console.log('WebRTC connected')
-        })
+// Capture frame from camera via REST API
+async function captureFrame(cameraRole, canvas) {
+    if (!canvas) return
 
-        rtcClient.on('disconnected', () => {
-            updateConnectionStatus(false)
-            console.log('WebRTC disconnected')
-            // Reconnect after delay
-            setTimeout(connectWebRTC, 3000)
-        })
+    const idx = roleMapping[cameraRole]
+    if (idx === undefined) {
+        console.warn(`Role ${cameraRole} not found in mapping`)
+        return
+    }
 
-        rtcClient.on('error', (err) => {
-            console.error('WebRTC error:', err)
-            updateConnectionStatus(false, 'Error')
-        })
+    try {
+        const res = await fetch(`${API_BASE}/capture?camera=${idx}`)
+        const data = await res.json()
 
-        rtcClient.on('cameraChange', (cameras) => {
-            console.log('Camera change detected:', cameras)
-            handleMessage({ data: JSON.stringify({ type: 'camera_change', cameras }) })
-        })
+        if (data.image) {
+            const img = new Image()
+            img.onload = () => {
+                canvas.width = img.width
+                canvas.height = img.height
+                const ctx = canvas.getContext('2d')
+                ctx.drawImage(img, 0, 0)
+            }
+            img.src = `data:image/jpeg;base64,${data.image}`
+        }
+    } catch (err) {
+        console.warn(`Failed to capture ${cameraRole}:`, err)
+    }
+}
 
-        // Connect to all cameras (no roles filter)
-        await rtcClient.connect()
-    } catch (e) {
-        console.error('WebRTC connection failed:', e)
-        updateConnectionStatus(false, 'Failed')
-        // Retry after delay
-        setTimeout(connectWebRTC, 5000)
+// Refresh all cameras
+async function refreshAllCameras() {
+    await Promise.all([
+        captureFrame('TopView', canvasElements[0]),
+        captureFrame('QuarterView', canvasElements[1]),
+        captureFrame('RightRobot', canvasElements[2]),
+        captureFrame('LeftRobot', canvasElements[3])
+    ])
+}
+
+// Auto-refresh cameras every 500ms
+function startAutoRefresh() {
+    if (refreshInterval) clearInterval(refreshInterval)
+    refreshInterval = setInterval(refreshAllCameras, 500)
+    console.log('Camera auto-refresh started (500ms)')
+}
+
+function stopAutoRefresh() {
+    if (refreshInterval) {
+        clearInterval(refreshInterval)
+        refreshInterval = null
+        console.log('Camera auto-refresh stopped')
     }
 }
 
