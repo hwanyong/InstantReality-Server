@@ -293,21 +293,19 @@ function setupEventListeners() {
 async function startCalibration() {
     if (isCalibrating) return
 
-    const gridSize = parseInt(elements.gridSize?.value) || 9
-    const zHeight = parseFloat(elements.calZ?.value) || 120
-
+    // Zero-Reference calibration - no parameters needed
     isCalibrating = true
     elements.startBtn.disabled = true
     elements.stopBtn.disabled = false
 
-    updateCalStatus('Starting calibration...')
-    updateProgress({ step: 0, total: 4 + gridSize, message: 'Initializing...' })
+    updateCalStatus('Starting Zero-Reference calibration...')
+    updateProgress({ step: 0, total: 4, message: 'Initializing...' })
 
     try {
         const response = await fetch(`${API_BASE}/calibration/start`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ grid_size: gridSize, z_height: zHeight })
+            body: JSON.stringify({})  // No parameters for Zero-Reference
         })
 
         if (!response.ok) {
@@ -315,7 +313,10 @@ async function startCalibration() {
         }
 
         const result = await response.json()
-        console.log('Calibration started:', result)
+        console.log('Zero-Reference calibration started:', result)
+
+        // Start polling for phase status
+        startPhasePolling()
 
     } catch (e) {
         console.error('Failed to start calibration:', e)
@@ -323,8 +324,57 @@ async function startCalibration() {
     }
 }
 
+// === Phase Status Polling for Zero-Reference Calibration ===
+let phasePollingInterval = null
+
+function startPhasePolling() {
+    if (phasePollingInterval) return
+    phasePollingInterval = setInterval(pollPhaseStatus, 2000)
+}
+
+function stopPhasePolling() {
+    if (phasePollingInterval) {
+        clearInterval(phasePollingInterval)
+        phasePollingInterval = null
+    }
+}
+
+async function pollPhaseStatus() {
+    try {
+        const resp = await fetch(`${API_BASE}/calibration/phase-status`)
+        const data = await resp.json()
+
+        // Update progress based on phase
+        updateProgress({
+            step: data.current_phase,
+            total: 4,
+            message: data.phase_name
+        })
+
+        // Update step indicators
+        updateStepIndicators(data.current_phase + 1, 4)
+
+        // Check if calibration is done
+        if (!data.is_running && data.current_phase >= 4) {
+            stopPhasePolling()
+            isCalibrating = false
+            elements.startBtn.disabled = false
+            elements.stopBtn.disabled = true
+
+            // Load final calibration data
+            await loadCalibration()
+        }
+
+    } catch (e) {
+        console.error('Phase status poll error:', e)
+    }
+}
+
 function stopCalibration() {
     if (!isCalibrating) return
+
+    // Stop polling first
+    stopPhasePolling()
 
     fetch(`${API_BASE}/calibration/stop`, { method: 'POST' })
         .then(() => {

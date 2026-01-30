@@ -106,6 +106,67 @@ class IKSolver:
                     slot["max"] - zero_offset
                 )
     
+    def forward_kinematics(
+        self,
+        theta1: float,
+        theta2: float,
+        theta3: float,
+        theta4: float,
+        theta5: float
+    ) -> Tuple[float, float, float]:
+        """
+        Forward Kinematics: Calculate gripper tip position from servo angles.
+        
+        Args:
+            theta1: Base yaw angle (degrees)
+            theta2: Shoulder angle (degrees)
+            theta3: Elbow angle (degrees) - note: inverted for Slot 3
+            theta4: Wrist pitch angle (degrees)
+            theta5: Roll angle (degrees) - does not affect position
+        
+        Returns:
+            (x, y, z) position of gripper tip in mm
+        """
+        # Convert to radians
+        t1 = math.radians(theta1)
+        t2 = math.radians(theta2)
+        t3 = math.radians(-theta3)  # Un-invert for FK calculation
+        t4 = math.radians(theta4)
+        
+        # Calculate shoulder position (at height d1)
+        # Shoulder is at base, raised by d1
+        
+        # Calculate elbow position relative to shoulder
+        # a2 is the shoulder-to-elbow link
+        elbow_r = self.a2 * math.cos(t2)
+        elbow_z = self.d1 + self.a2 * math.sin(t2)
+        
+        # Calculate wrist position relative to elbow
+        # a3 is the elbow-to-wrist link
+        # Total angle from horizontal = theta2 + theta3
+        wrist_angle = t2 + t3
+        wrist_r = elbow_r + self.a3 * math.cos(wrist_angle)
+        wrist_z = elbow_z + self.a3 * math.sin(wrist_angle)
+        
+        # Calculate roll joint position (a4 from wrist)
+        # theta4 is wrist pitch
+        roll_angle = wrist_angle + t4
+        roll_r = wrist_r + self.a4 * math.cos(roll_angle)
+        roll_z = wrist_z + self.a4 * math.sin(roll_angle)
+        
+        # Calculate gripper tip position (a6 from roll joint)
+        # Gripper points down (perpendicular to roll joint)
+        gripper_angle = roll_angle - math.radians(90)  # -90 for downward
+        tip_r = roll_r + self.a6 * math.cos(gripper_angle)
+        tip_z = roll_z + self.a6 * math.sin(gripper_angle)
+        
+        # Convert from polar (r, theta1) to Cartesian (x, y)
+        x = tip_r * math.cos(t1)
+        y = tip_r * math.sin(t1)
+        z = tip_z
+        
+        return (x, y, z)
+    
     def solve(self, x: float, y: float, z: float, roll: float = 90.0) -> IKResult:
         """
         Solve 5-Link IK for gripper tip position.

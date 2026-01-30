@@ -43,12 +43,13 @@ def setup_calibration_routes(app, camera_manager=None, calibrator=None):
     app.router.add_post('/api/calibration/verify', handle_verify)
     app.router.add_post('/api/calibration/verify-visual', handle_verify_visual)
     app.router.add_post('/api/calibration/grasp', handle_grasp_with_verification)
+    app.router.add_get('/api/calibration/phase-status', handle_phase_status)
     
     logger.info("Calibration API routes registered")
 
 
 async def handle_start(request):
-    """Start auto-calibration routine."""
+    """Start Zero-Reference auto-calibration routine."""
     global _calibration_task, _calibrator
     
     if _calibration_task and not _calibration_task.done():
@@ -57,23 +58,15 @@ async def handle_start(request):
             'error': 'Calibration already in progress'
         }, status=400)
     
-    try:
-        data = await request.json()
-    except Exception:
-        data = {}
-    
-    grid_size = data.get('grid_size', 9)
-    z_height = data.get('z_height', 120.0)
-    
     if _calibrator is None:
         # Lazy import to avoid circular dependencies
         try:
-            from robotics.auto_calibrator import AutoCalibrator
+            from robotics.auto_calibrator import ZeroReferenceCalibrator
             from robotics.coordinator import RobotCoordinator
             
             # Create coordinator and calibrator
             robot = RobotCoordinator()
-            _calibrator = AutoCalibrator(robot, _camera)
+            _calibrator = ZeroReferenceCalibrator(robot, _camera)
         except ImportError as e:
             return web.json_response({
                 'success': False,
@@ -83,11 +76,10 @@ async def handle_start(request):
     async def run_calibration():
         """Background calibration task."""
         try:
-            result = await _calibrator.run_full_calibration(
-                grid_size=grid_size,
-                z_height=z_height,
-                save_path=str(CALIBRATION_FILE)
-            )
+            result = await _calibrator.run_full_calibration()
+            
+            # Save calibration data
+            _calibrator.save_calibration(result, str(CALIBRATION_FILE))
             
             # Broadcast completion via WebSocket
             if hasattr(request.app, 'ws_broadcast'):

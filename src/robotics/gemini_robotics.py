@@ -185,6 +185,115 @@ CRITICAL: Point must be the CENTER of the base mount, not the arm body."""
         
         return self._parse_json_response(response.text)
     
+    async def measure_z_from_side(self, image_bytes: bytes) -> Dict:
+        """
+        Measure gripper height from side view (QuarterView).
+        
+        Uses QuarterView camera to estimate Z-height by measuring
+        the vertical pixel position of the gripper tip.
+        
+        Args:
+            image_bytes: JPEG image from QuarterView camera
+        
+        Returns:
+            {
+                "gripper_y_pixel": int,  # Y pixel position (0=top, 1000=bottom)
+                "estimated_height": str,  # "high", "medium", "low", "ground"
+                "confidence": float
+            }
+        """
+        from google.genai import types
+        
+        prompt = """You are a calibration vision system measuring gripper HEIGHT from a SIDE VIEW.
+
+This is a side/quarter view of the robot arm. Measure where the gripper tip is vertically.
+
+Output Requirements:
+- Return ONLY valid JSON
+- Format: {
+    "gripper_y_pixel": <0-1000 where 0=top, 1000=bottom>,
+    "estimated_height": "high|medium|low|ground",
+    "confidence": 0.0-1.0
+}
+
+Height estimation guide:
+- high: Gripper is in upper 1/4 of image (0-250)
+- medium: Gripper is in second 1/4 (250-500)
+- low: Gripper is in third 1/4 (500-750)
+- ground: Gripper is in bottom 1/4 (750-1000) or touching surface
+
+CRITICAL: Focus on the VERTICAL position of the gripper tip only."""
+
+        config = types.GenerateContentConfig(
+            temperature=0.2,
+            thinking_config=types.ThinkingConfig(thinking_budget=0)
+        )
+        
+        response = self.client.models.generate_content(
+            model=self.MODEL_ID,
+            contents=[
+                types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg"),
+                prompt
+            ],
+            config=config
+        )
+        
+        return self._parse_json_response(response.text)
+    
+    async def get_gripper_tip_precise(self, image_bytes: bytes) -> Dict:
+        """
+        Get precise gripper tip position from RobotCamera (close-up view).
+        
+        Uses RightRobot or LeftRobot camera for high-precision tip detection.
+        
+        Args:
+            image_bytes: JPEG image from RobotCamera
+        
+        Returns:
+            {
+                "point": [y, x],  # 0-1000 normalized
+                "tip_visible": bool,
+                "confidence": float,
+                "tip_state": str  # "open", "closed", "unknown"
+            }
+        """
+        from google.genai import types
+        
+        prompt = """You are a precision calibration system viewing the gripper from a CLOSE-UP camera.
+
+This is a close-up view of the robot gripper. Find the EXACT CENTER of the gripper tip.
+
+Output Requirements:
+- Return ONLY valid JSON
+- Format: {
+    "point": [y, x],
+    "tip_visible": true/false,
+    "confidence": 0.0-1.0,
+    "tip_state": "open|closed|unknown"
+}
+- Coordinates normalized 0-1000 where [0,0] is top-left
+
+CRITICAL: 
+1. Point must be the CENTER of the gripper tip opening
+2. If gripper is closed, return center of closed tips
+3. tip_visible = false if gripper is not clearly visible"""
+
+        config = types.GenerateContentConfig(
+            temperature=0.1,  # Very low for maximum precision
+            thinking_config=types.ThinkingConfig(thinking_budget=0)
+        )
+        
+        response = self.client.models.generate_content(
+            model=self.MODEL_ID,
+            contents=[
+                types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg"),
+                prompt
+            ],
+            config=config
+        )
+        
+        return self._parse_json_response(response.text)
+    
     async def analyze_object_for_grasping(
         self,
         image_bytes: bytes,

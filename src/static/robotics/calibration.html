@@ -277,31 +277,31 @@
                     <!-- Calibration Steps -->
                     <div id="cal-steps">
                         <div class="calibration-step" id="step-1">
-                            <span class="step-icon">🎯</span>
+                            <span class="step-icon">🏠</span>
                             <div class="step-content">
-                                <div class="step-title">로봇 베이스 감지</div>
-                                <div class="step-desc">AI가 로봇 기준점을 찾습니다</div>
+                                <div class="step-title">Phase 0: 초기화</div>
+                                <div class="step-desc">Home 이동 및 4카메라 확인</div>
                             </div>
                         </div>
                         <div class="calibration-step" id="step-2">
-                            <span class="step-icon">🔲</span>
+                            <span class="step-icon">📐</span>
                             <div class="step-content">
-                                <div class="step-title">그리드 캘리브레이션</div>
-                                <div class="step-desc">9개 포인트 이동 및 감지</div>
+                                <div class="step-title">Phase 1: TopView Homography</div>
+                                <div class="step-desc">FK 기반 9포인트 자기 탐색</div>
                             </div>
                         </div>
                         <div class="calibration-step" id="step-3">
-                            <span class="step-icon">📐</span>
+                            <span class="step-icon">📏</span>
                             <div class="step-content">
-                                <div class="step-title">변환 계산</div>
-                                <div class="step-desc">Homography 매트릭스 계산</div>
+                                <div class="step-title">Phase 2: Z-Height 캘리브레이션</div>
+                                <div class="step-desc">QuarterView로 4단계 높이 매핑</div>
                             </div>
                         </div>
                         <div class="calibration-step" id="step-4">
-                            <span class="step-icon">🗺️</span>
+                            <span class="step-icon">✅</span>
                             <div class="step-content">
-                                <div class="step-title">작업 범위 매핑</div>
-                                <div class="step-desc">IK로 도달 가능 영역 탐색</div>
+                                <div class="step-title">Phase 3: 교차 검증</div>
+                                <div class="step-desc">RobotCamera 정밀도 확인</div>
                             </div>
                         </div>
                     </div>
@@ -312,8 +312,8 @@
                     </div>
                 </div>
 
-                <!-- Manual Calibration Controls -->
-                <div class="control-card">
+                <!-- Manual Grid Control (Hidden - Zero-Reference uses automatic positioning) -->
+                <div class="control-card" style="display: none;">
                     <h3>🎛️ Manual Grid Control</h3>
                     <div class="ik-inputs">
                         <label>Grid Size:
