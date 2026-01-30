@@ -109,34 +109,44 @@ class GeminiBrain:
 
             contents = []
             
-            # Build prompt for scene inventory
-            prompt = """You are scanning a robot workspace to create an object inventory.
+            # Build prompt for scene inventory with Master-Reference strategy
+            prompt = """You are a Robotics Vision System analyzing a dual-camera workspace.
 
-Image 1: TOP-DOWN VIEW (overhead camera) - Use this as the MASTER reference for all coordinates.
+Input Context:
+1. Image 1 (MASTER): TOP-DOWN overhead view.
+   - The robot base is at the BOTTOM of this image.
+   - Use this image EXCLUSIVELY for all [y, x] coordinate calculations.
 """
             if quarterview_frame is not None:
                 quarterview_bytes = self._encode_frame(quarterview_frame)
                 if quarterview_bytes:
-                    prompt += "Image 2: QUARTER VIEW (45-degree angle) - Use this for understanding object height and orientation.\n"
+                    prompt += """
+2. Image 2 (REFERENCE): QUARTER VIEW from front-to-back perspective (45°).
+   - Camera looks from the operator's position toward the robot.
+   - Use this to understand object height, depth, and verify occluded objects.
+"""
             
             prompt += """
-Task: Detect ALL moveable objects on the table.
+Task: Detect ALL graspable objects on the workspace table.
 
-Return a JSON object with:
+Output Format (JSON):
 {
     "objects": [
         {
-            "label": "descriptive name (e.g., red cup)",
+            "label": "descriptive name (e.g., red cup, blue marker)",
             "box_2d": [ymin, xmin, ymax, xmax],
-            "grasp_strategy": "vertical" or "horizontal"
+            "grasp_strategy": "vertical" or "horizontal",
+            "orientation": "brief description from angled view"
         }
     ]
 }
 
 Rules:
-- Coordinates are normalized 0-1000 based on Image 1 (TopView)
-- Do NOT detect the robot arms
-- Distinguish identical items by color or position in label
+- Coordinates MUST be normalized 0-1000 based on Image 1 (Top-Down) ONLY.
+- Do NOT detect robot arms or fixed equipment.
+- Distinguish identical items by color or relative position (e.g., "left red cup", "right red cup").
+- If an object is partially occluded in Image 1, use Image 2 to verify its existence.
+- Include ALL visible moveable objects - do not skip any.
 """
             
             # Add images to contents
