@@ -113,9 +113,7 @@ async def handle_start(request):
     
     return web.json_response({
         'success': True,
-        'message': 'Calibration started',
-        'grid_size': grid_size,
-        'z_height': z_height
+        'message': 'Zero-Reference calibration started'
     })
 
 

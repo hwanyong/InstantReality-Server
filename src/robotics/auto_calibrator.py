@@ -178,8 +178,8 @@ class ZeroReferenceCalibrator:
         - Verify cameras are working
         """
         try:
-            # Move to home position
-            await self.robot.move_to_home()
+            # Move to home position (sync method)
+            self.robot.go_home()
             await asyncio.sleep(1.0)
             
             # Capture from all cameras to verify they work
@@ -242,10 +242,10 @@ class ZeroReferenceCalibrator:
                     theta1, theta2, theta3, theta4, theta5
                 )
                 
-                # Move robot to this angle configuration
-                await self.robot.move_to_angles(
-                    theta1, theta2, theta3, theta4, theta5
-                )
+                # Move robot to this angle configuration (sync via servo)
+                self.robot.servo.move_to_angles({
+                    1: theta1, 2: theta2, 3: theta3, 4: theta4, 5: theta5
+                })
                 await asyncio.sleep(1.5)  # Stabilization
                 
                 # Capture TopView and detect gripper
@@ -404,10 +404,10 @@ class ZeroReferenceCalibrator:
                     f"Validation point {i+1}/{len(test_positions)}"
                 )
                 
-                # Move to position
-                await self.robot.move_to_angles(
-                    theta1, theta2, theta3, theta4, theta5
-                )
+                # Move to position (sync via servo)
+                self.robot.servo.move_to_angles({
+                    1: theta1, 2: theta2, 3: theta3, 4: theta4, 5: theta5
+                })
                 await asyncio.sleep(1.5)
                 
                 # Get TopView detection
