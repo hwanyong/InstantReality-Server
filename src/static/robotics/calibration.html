@@ -235,6 +235,25 @@
 
             <!-- Right Panel: Calibration Controls -->
             <section class="control-section">
+                <!-- Robot Connection Test -->
+                <div class="control-card">
+                    <h3>🤖 Robot Control</h3>
+                    <p style="font-size: 0.75rem; color: var(--text-secondary); margin-bottom: 12px;">
+                        로봇 연결 및 포지션 제어 테스트
+                    </p>
+                    
+                    <div class="calibration-status" id="robot-status">Disconnected</div>
+                    
+                    <div class="btn-group">
+                        <button id="robot-connect-btn" class="btn-primary">🔌 Connect</button>
+                        <button id="robot-disconnect-btn" class="btn-danger" disabled>⛔ Disconnect</button>
+                    </div>
+                    <div class="btn-group" style="margin-top: 8px;">
+                        <button id="go-home-btn" class="btn" disabled>🏠 Go Home</button>
+                        <button id="go-zero-btn" class="btn" disabled>📐 Go to Zero</button>
+                    </div>
+                </div>
+
                 <!-- Auto-Calibration -->
                 <div class="control-card">
                     <h3>🎯 Auto-Calibration</h3>

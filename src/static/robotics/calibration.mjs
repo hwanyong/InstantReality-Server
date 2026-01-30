@@ -24,6 +24,7 @@ let arCanvas = null
 let workspaceCanvas = null
 let roleMapping = {}
 let refreshInterval = null
+let isRobotConnected = false
 
 // DOM Elements
 const elements = {
@@ -226,6 +227,12 @@ function setupEventListeners() {
     // Detection buttons
     document.getElementById('detect-base-btn')?.addEventListener('click', detectRobotBase)
     document.getElementById('detect-gripper-btn')?.addEventListener('click', detectGripper)
+
+    // Robot control buttons
+    document.getElementById('robot-connect-btn')?.addEventListener('click', connectRobot)
+    document.getElementById('robot-disconnect-btn')?.addEventListener('click', disconnectRobot)
+    document.getElementById('go-home-btn')?.addEventListener('click', goHome)
+    document.getElementById('go-zero-btn')?.addEventListener('click', goToZero)
 
     // Grid preview
     document.getElementById('test-grid-btn')?.addEventListener('click', previewGridPoints)
@@ -677,5 +684,108 @@ async function verifyCalibration() {
         }
     } catch (e) {
         updateCalStatus(`❌ Verification failed: ${e.message}`)
+    }
+}
+
+// =============================================================================
+// Robot Control Functions
+// =============================================================================
+
+function updateRobotStatus(connected, message = null) {
+    const statusEl = document.getElementById('robot-status')
+    if (statusEl) {
+        statusEl.textContent = message || (connected ? 'Connected' : 'Disconnected')
+        statusEl.className = `calibration-status ${connected ? 'active' : ''}`
+    }
+
+    // Update button states
+    const connectBtn = document.getElementById('robot-connect-btn')
+    const disconnectBtn = document.getElementById('robot-disconnect-btn')
+    const homeBtn = document.getElementById('go-home-btn')
+    const zeroBtn = document.getElementById('go-zero-btn')
+
+    if (connectBtn) connectBtn.disabled = connected
+    if (disconnectBtn) disconnectBtn.disabled = !connected
+    if (homeBtn) homeBtn.disabled = !connected
+    if (zeroBtn) zeroBtn.disabled = !connected
+
+    isRobotConnected = connected
+}
+
+async function connectRobot() {
+    updateRobotStatus(false, 'Connecting...')
+
+    try {
+        const response = await fetch(`${API_BASE}/robot/connect`, {
+            method: 'POST'
+        })
+        const result = await response.json()
+
+        if (result.success) {
+            updateRobotStatus(true, `Connected: ${result.port}`)
+            console.log('Robot connected:', result)
+        } else {
+            updateRobotStatus(false, `❌ ${result.error}`)
+        }
+    } catch (e) {
+        updateRobotStatus(false, `❌ ${e.message}`)
+    }
+}
+
+async function disconnectRobot() {
+    try {
+        const response = await fetch(`${API_BASE}/robot/disconnect`, {
+            method: 'POST'
+        })
+        const result = await response.json()
+
+        updateRobotStatus(false, 'Disconnected')
+        console.log('Robot disconnected:', result)
+    } catch (e) {
+        updateRobotStatus(false, `❌ ${e.message}`)
+    }
+}
+
+async function goHome() {
+    if (!isRobotConnected) return
+
+    updateRobotStatus(true, '🏠 Moving to Home...')
+
+    try {
+        const response = await fetch(`${API_BASE}/robot/home`, {
+            method: 'POST'
+        })
+        const result = await response.json()
+
+        if (result.success) {
+            updateRobotStatus(true, '✅ Home position reached')
+            console.log('Go Home result:', result)
+        } else {
+            updateRobotStatus(true, `❌ ${result.error}`)
+        }
+    } catch (e) {
+        updateRobotStatus(true, `❌ ${e.message}`)
+    }
+}
+
+async function goToZero() {
+    if (!isRobotConnected) return
+
+    updateRobotStatus(true, '📐 Moving to Zero...')
+
+    try {
+        const response = await fetch(`${API_BASE}/robot/zero`, {
+            method: 'POST'
+        })
+        const result = await response.json()
+
+        if (result.success) {
+            updateRobotStatus(true, '✅ Zero position reached')
+            console.log('Go Zero result:', result)
+        } else {
+            updateRobotStatus(true, `❌ ${result.error}`)
+        }
+    } catch (e) {
+        updateRobotStatus(true, `❌ ${e.message}`)
     }
 }
