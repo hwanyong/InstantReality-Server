@@ -41,6 +41,8 @@ def setup_calibration_routes(app, camera_manager=None, calibrator=None):
     app.router.add_post('/api/calibration/detect-base', handle_detect_base)
     app.router.add_post('/api/calibration/detect-gripper', handle_detect_gripper)
     app.router.add_post('/api/calibration/verify', handle_verify)
+    app.router.add_post('/api/calibration/verify-visual', handle_verify_visual)
+    app.router.add_post('/api/calibration/grasp', handle_grasp_with_verification)
     
     logger.info("Calibration API routes registered")
 
@@ -279,3 +281,145 @@ async def handle_verify(request):
             'success': False,
             'error': str(e)
         }, status=500)
+
+
+async def handle_verify_visual(request):
+    """
+    Verify action using Visual Success Detection.
+    
+    Compare before/after images to verify if expected change occurred.
+    POST body: {"expected_change": "object picked up"}
+    """
+    global _camera
+    
+    if _camera is None:
+        return web.json_response({
+            'success': False,
+            'error': 'Camera not available'
+        }, status=503)
+    
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+    
+    expected_change = data.get('expected_change', 'robot moved to target')
+    
+    try:
+        from robotics.gemini_robotics import GeminiRoboticsClient
+        
+        # Capture before image
+        before_frame = _camera.capture()
+        if before_frame is None:
+            return web.json_response({
+                'success': False,
+                'error': 'Failed to capture before frame'
+            }, status=500)
+        
+        before_image = GeminiRoboticsClient.encode_frame(before_frame)
+        
+        # Wait for user to perform action (or use provided after image)
+        await asyncio.sleep(0.5)
+        
+        # Capture after image
+        after_frame = _camera.capture()
+        if after_frame is None:
+            return web.json_response({
+                'success': False,
+                'error': 'Failed to capture after frame'
+            }, status=500)
+        
+        after_image = GeminiRoboticsClient.encode_frame(after_frame)
+        
+        # Run Visual Verification
+        client = GeminiRoboticsClient()
+        result = await client.verify_action_success(
+            before_image,
+            after_image,
+            expected_change
+        )
+        
+        logger.info(f"Visual Verification: success={result.get('success')}, confidence={result.get('confidence')}")
+        
+        return web.json_response({
+            'success': True,
+            'verified': result.get('success', False),
+            'confidence': result.get('confidence', 0.0),
+            'reason': result.get('reason', ''),
+            'detected_change': result.get('detected_change', '')
+        })
+        
+    except Exception as e:
+        logger.error(f"Visual verification error: {e}")
+        return web.json_response({
+            'success': False,
+            'error': str(e)
+        }, status=500)
+
+
+async def handle_grasp_with_verification(request):
+    """
+    Grasp object with visual verification and auto-retry.
+    
+    POST body: {
+        "target_object": "red block",
+        "z_level": "low",
+        "max_attempts": 10
+    }
+    """
+    global _camera, _calibrator
+    
+    if _camera is None:
+        return web.json_response({
+            'success': False,
+            'error': 'Camera not available'
+        }, status=503)
+    
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+    
+    target_object = data.get('target_object', 'target object')
+    z_level = data.get('z_level', 'low')
+    max_attempts = data.get('max_attempts', 10)
+    
+    try:
+        from robotics.coordinator import RobotCoordinator
+        from robotics.gemini_robotics import GeminiRoboticsClient
+        
+        # Create or reuse coordinator
+        if _calibrator and hasattr(_calibrator, 'robot'):
+            coordinator = _calibrator.robot
+        else:
+            coordinator = RobotCoordinator()
+            coordinator.connect()
+        
+        # Camera capture function
+        def capture_fn():
+            frame = _camera.capture()
+            return GeminiRoboticsClient.encode_frame(frame) if frame is not None else b''
+        
+        # Run grasp with verification
+        result = await coordinator.grasp_with_verification(
+            camera_fn=capture_fn,
+            target_object=target_object,
+            z_level=z_level,
+            max_attempts=max_attempts
+        )
+        
+        logger.info(f"Grasp with verification: success={result['success']}, attempts={result['attempts']}")
+        
+        return web.json_response({
+            'success': result['success'],
+            'attempts': result['attempts'],
+            'verification_log': result['verification_log']
+        })
+        
+    except Exception as e:
+        logger.error(f"Grasp verification error: {e}")
+        return web.json_response({
+            'success': False,
+            'error': str(e)
+        }, status=500)
+
