@@ -52,9 +52,9 @@
     }
   },
   "workspace_roi": {
-    "ymin": 80,
-    "xmin": 220,
-    "ymax": 920,
-    "xmax": 780
+    "ymin": 40,
+    "xmin": 175,
+    "ymax": 970,
+    "xmax": 820
   }
 }
