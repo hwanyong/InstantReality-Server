@@ -345,6 +345,11 @@ async def on_startup(app):
     print("Background camera polling started (3s interval)")
 
 if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description='InstantReality Server')
+    parser.add_argument('--port', '-p', type=int, default=8080, help='Port number (default: 8080)')
+    args = parser.parse_args()
+    
     # 1. Discover and start cameras at server boot (Broadcast Mode)
     print("Discovering and initializing cameras...")
     discovered_indices = discover_cameras(max_indices=8)
@@ -376,5 +381,5 @@ if __name__ == "__main__":
     app.on_shutdown.append(on_shutdown)
     app.on_startup.append(on_startup)
     
-    print("Server started at http://localhost:8080")
-    web.run_app(app, port=8080)
+    print(f"Server started at http://localhost:{args.port}")
+    web.run_app(app, port=args.port)

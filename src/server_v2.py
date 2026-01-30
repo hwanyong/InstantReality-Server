@@ -429,7 +429,11 @@ def create_app():
 
 
 if __name__ == '__main__':
-    PORT = 8080
+    import argparse
+    parser = argparse.ArgumentParser(description='InstantReality Scene Init Server')
+    parser.add_argument('--port', '-p', type=int, default=8080, help='Port number (default: 8080)')
+    args = parser.parse_args()
+    
     app = create_app()
-    logger.info(f"Starting Scene Init Server on port {PORT}")
-    web.run_app(app, host='0.0.0.0', port=PORT)
+    logger.info(f"Starting Scene Init Server on port {args.port}")
+    web.run_app(app, host='0.0.0.0', port=args.port)
