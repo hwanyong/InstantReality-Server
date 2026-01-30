@@ -12,6 +12,14 @@ from pathlib import Path
 from aiohttp import web
 import aiohttp_cors
 
+# WebRTC imports
+try:
+    from aiortc import RTCPeerConnection, RTCSessionDescription, RTCRtpSender
+    WEBRTC_AVAILABLE = True
+except ImportError:
+    WEBRTC_AVAILABLE = False
+    logging.warning("aiortc not installed - WebRTC disabled")
+
 # Add project root to path for lib imports
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -21,6 +29,9 @@ from src.camera_mapping import get_index_by_role, get_available_devices, match_r
 from src.ai_engine import GeminiBrain
 from src.calibration_api import setup_calibration_routes
 
+if WEBRTC_AVAILABLE:
+    from src.webrtc.video_track import OpenCVVideoCapture
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -28,6 +39,11 @@ logger = logging.getLogger(__name__)
 # Global instances
 brain: GeminiBrain = None
 SCENE_INVENTORY = []
+
+# WebRTC state
+pcs = set()  # Active PeerConnections
+active_tracks = {}  # {pc_id: {camera_index: track}}
+ws_clients = set()  # WebSocket clients
 
 
 # =============================================================================
@@ -316,6 +332,121 @@ async def handle_roi_save(request):
 
 
 # =============================================================================
+# WebRTC Handlers
+# =============================================================================
+
+async def handle_offer(request):
+    """POST /offer - WebRTC SDP negotiation"""
+    if not WEBRTC_AVAILABLE:
+        return web.json_response({"error": "WebRTC not available"}, status=503)
+    
+    params = await request.json()
+    offer = RTCSessionDescription(sdp=params["sdp"], type=params["type"])
+    
+    pc = RTCPeerConnection()
+    pcs.add(pc)
+    pc_id = str(id(pc))
+    active_tracks[pc_id] = {}
+    
+    logger.info(f"New WebRTC connection: {pc_id}")
+    
+    @pc.on("connectionstatechange")
+    async def on_connectionstatechange():
+        logger.info(f"Connection state: {pc.connectionState}")
+        if pc.connectionState == "failed" or pc.connectionState == "closed":
+            await pc.close()
+            pcs.discard(pc)
+            active_tracks.pop(pc_id, None)
+    
+    # Add video tracks for active cameras
+    camera_indices = get_active_cameras()
+    if not camera_indices:
+        logger.warning("No cameras running for WebRTC")
+    
+    # Force H.264 codec
+    h264_codecs = []
+    try:
+        capabilities = RTCRtpSender.getCapabilities("video")
+        h264_codecs = [c for c in capabilities.codecs if "H264" in c.mimeType]
+    except Exception as e:
+        logger.debug(f"H.264 not available: {e}")
+    
+    for idx in camera_indices:
+        try:
+            track = OpenCVVideoCapture(camera_index=idx, options={"width": 1920, "height": 1080})
+            sender = pc.addTrack(track)
+            active_tracks[pc_id][idx] = track
+            
+            if h264_codecs:
+                transceiver = next((t for t in pc.getTransceivers() if t.sender == sender), None)
+                if transceiver:
+                    transceiver.setCodecPreferences(h264_codecs)
+            
+            logger.info(f"Added track for camera {idx}")
+        except Exception as e:
+            logger.error(f"Failed to add track for camera {idx}: {e}")
+    
+    await pc.setRemoteDescription(offer)
+    answer = await pc.createAnswer()
+    await pc.setLocalDescription(answer)
+    
+    return web.json_response({
+        "sdp": pc.localDescription.sdp,
+        "type": pc.localDescription.type,
+        "client_id": pc_id
+    })
+
+
+async def handle_websocket(request):
+    """GET /ws - WebSocket for real-time updates"""
+    ws = web.WebSocketResponse()
+    await ws.prepare(request)
+    ws_clients.add(ws)
+    logger.info(f"WebSocket client connected. Total: {len(ws_clients)}")
+    
+    try:
+        async for msg in ws:
+            pass  # Keep-alive
+    finally:
+        ws_clients.discard(ws)
+        logger.info(f"WebSocket client disconnected. Total: {len(ws_clients)}")
+    
+    return ws
+
+
+async def handle_pause_camera(request):
+    """POST /pause_camera - Pause/resume camera track"""
+    data = await request.json()
+    camera_index = int(data.get("camera_index", 0))
+    paused = data.get("paused", True)
+    client_id = data.get("client_id")
+    
+    if client_id and client_id in active_tracks:
+        if camera_index in active_tracks[client_id]:
+            active_tracks[client_id][camera_index].set_paused(paused)
+            logger.info(f"Camera {camera_index}: paused={paused}")
+    
+    return web.json_response({"success": True, "camera_index": camera_index, "paused": paused})
+
+
+async def broadcast_camera_change(cameras):
+    """Broadcast camera change to all WebSocket clients"""
+    if not ws_clients:
+        return
+    
+    msg = json.dumps({"type": "camera_change", "cameras": cameras})
+    dead_clients = set()
+    
+    for ws in ws_clients:
+        try:
+            await ws.send_str(msg)
+        except Exception:
+            dead_clients.add(ws)
+    
+    ws_clients.difference_update(dead_clients)
+
+
+# =============================================================================
 # Static Files & App Setup
 # =============================================================================
 
@@ -406,11 +537,24 @@ def create_app():
     for route in api_routes:
         cors.add(app.router.add_route(route.method, route.path, route.handler))
     
-    # Static files
+    # WebRTC routes (no CORS needed for these)
+    if WEBRTC_AVAILABLE:
+        cors.add(app.router.add_route('POST', '/offer', handle_offer))
+        cors.add(app.router.add_route('POST', '/pause_camera', handle_pause_camera))
+        app.router.add_get('/ws', handle_websocket)
+        logger.info("WebRTC routes registered: /offer, /ws, /pause_camera")
+    
+    # Static files - robotics UI
     static_path = Path(__file__).parent / 'static' / 'robotics'
     if static_path.exists():
         app.router.add_static('/robotics/', static_path)
         logger.info(f"Serving static files from: {static_path}")
+    
+    # Static files - SDK
+    sdk_path = Path(__file__).parent / 'sdk'
+    if sdk_path.exists():
+        app.router.add_static('/sdk/', sdk_path)
+        logger.info(f"Serving SDK from: {sdk_path}")
     
     # Calibration API routes
     setup_calibration_routes(app, camera_manager=None)

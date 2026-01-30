@@ -6,17 +6,24 @@
  * - Workspace visualization
  * - Calibration data management
  * - Real-time progress updates
+ * - WebRTC video streaming via InstantReality SDK
  */
+
+import { InstantReality } from '/sdk/instant-reality.mjs'
 
 // Configuration
 const API_BASE = '/api'
-const WS_URL = `ws://${location.host}/ws`
+
+// WebRTC Client
+const rtcClient = new InstantReality({
+    serverUrl: window.location.origin,
+    maxCameras: 1
+})
 
 // State
-let ws = null
 let isCalibrating = false
 let calibrationData = null
-let videoCanvas = null
+let videoElement = null
 let arCanvas = null
 let workspaceCanvas = null
 
@@ -44,8 +51,8 @@ async function init() {
     // Setup canvases
     setupCanvases()
 
-    // Connect WebSocket
-    connectWebSocket()
+    // Connect WebRTC
+    await connectWebRTC()
 
     // Load existing calibration
     await loadCalibration()
@@ -81,7 +88,7 @@ function cacheElements() {
 }
 
 function setupCanvases() {
-    videoCanvas = document.getElementById('video-canvas')
+    videoElement = document.getElementById('camera-video')
     arCanvas = document.getElementById('ar-overlay')
     workspaceCanvas = document.getElementById('workspace-canvas')
 
@@ -94,36 +101,54 @@ function setupCanvases() {
     }
 }
 
-function connectWebSocket() {
+async function connectWebRTC() {
     try {
-        ws = new WebSocket(WS_URL)
+        updateConnectionStatus(false, 'Connecting...')
 
-        ws.onopen = () => {
+        // Setup event handlers before connecting
+        rtcClient.on('track', (track, cameraIndex) => {
+            console.log(`Received video track ${cameraIndex}`)
+            if (videoElement && track.kind == 'video') {
+                videoElement.srcObject = new MediaStream([track])
+                videoElement.play().catch(e => console.warn('Video autoplay blocked:', e))
+            }
+        })
+
+        rtcClient.on('connected', () => {
             updateConnectionStatus(true)
-            console.log('WebSocket connected')
-        }
+            console.log('WebRTC connected')
+        })
 
-        ws.onclose = () => {
+        rtcClient.on('disconnected', () => {
             updateConnectionStatus(false)
-            console.log('WebSocket disconnected')
+            console.log('WebRTC disconnected')
             // Reconnect after delay
-            setTimeout(connectWebSocket, 3000)
-        }
+            setTimeout(connectWebRTC, 3000)
+        })
 
-        ws.onmessage = handleMessage
+        rtcClient.on('error', (err) => {
+            console.error('WebRTC error:', err)
+            updateConnectionStatus(false, 'Error')
+        })
 
-        ws.onerror = (err) => {
-            console.error('WebSocket error:', err)
-        }
+        rtcClient.on('cameraChange', (cameras) => {
+            console.log('Camera change detected:', cameras)
+            handleMessage({ data: JSON.stringify({ type: 'camera_change', cameras }) })
+        })
+
+        await rtcClient.connect()
     } catch (e) {
-        console.error('WebSocket connection failed:', e)
-        updateConnectionStatus(false)
+        console.error('WebRTC connection failed:', e)
+        updateConnectionStatus(false, 'Failed')
+        // Retry after delay
+        setTimeout(connectWebRTC, 5000)
     }
 }
 
-function updateConnectionStatus(connected) {
+function updateConnectionStatus(connected, message = null) {
     if (elements.connectionStatus) {
-        elements.connectionStatus.textContent = connected ? '● Connected' : '● Disconnected'
+        const text = message || (connected ? 'Connected' : 'Disconnected')
+        elements.connectionStatus.textContent = `● ${text}`
         elements.connectionStatus.className = `status ${connected ? 'connected' : 'disconnected'}`
     }
 }
