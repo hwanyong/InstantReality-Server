@@ -425,19 +425,6 @@ async function detectGripper() {
     }
 }
 
-async function captureFrame() {
-    try {
-        const response = await fetch(`${API_BASE}/camera/capture`)
-        const blob = await response.blob()
-        const img = await createImageBitmap(blob)
-
-        const ctx = videoCanvas.getContext('2d')
-        ctx.drawImage(img, 0, 0, videoCanvas.width, videoCanvas.height)
-    } catch (e) {
-        console.error('Capture failed:', e)
-    }
-}
-
 // === Visualization ===
 
 function drawDetection(data) {
