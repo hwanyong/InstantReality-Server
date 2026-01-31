@@ -992,17 +992,25 @@ class CalibratorGUI:
         """Record current arm's pulse values to a vertex."""
         arm = self.current_arm_tab
         
-        # Collect current UI pulse values (not from manager, from UI sliders)
+        # Collect current UI pulse values and calculate angles
         pulses = {}
+        angles = {}
         for slot in range(1, NUM_SLOTS + 1):
             pulse = self.pulse_vars[(arm, slot)].get()
             pulses[f"slot_{slot}"] = pulse
+            
+            # Convert pulse to angle using motor config
+            slot_key = f"slot_{slot}"
+            motor_config = self.manager.config.get(arm, {}).get(slot_key, {})
+            angle = self.pulse_mapper.pulse_to_angle(pulse, motor_config)
+            angles[f"slot_{slot}"] = round(angle, 1)
         
         # Save to manager (with exclusive ownership)
         self.manager._ensure_vertices_exists()
         self.manager.config["vertices"][str(vertex_id)] = {
             "owner": arm,
-            "pulses": pulses
+            "pulses": pulses,
+            "angles": angles
         }
         
         # Update indicator
@@ -1051,15 +1059,25 @@ class CalibratorGUI:
 
     def _on_record_share_point(self, arm):
         """Record current arm's pulse values as its share point."""
-        # Collect current UI pulse values
+        # Collect current UI pulse values and calculate angles
         pulses = {}
+        angles = {}
         for slot in range(1, NUM_SLOTS + 1):
             pulse = self.pulse_vars[(arm, slot)].get()
             pulses[f"slot_{slot}"] = pulse
+            
+            # Convert pulse to angle using motor config
+            slot_key = f"slot_{slot}"
+            motor_config = self.manager.config.get(arm, {}).get(slot_key, {})
+            angle = self.pulse_mapper.pulse_to_angle(pulse, motor_config)
+            angles[f"slot_{slot}"] = round(angle, 1)
         
         # Save to manager
         self.manager._ensure_share_points_exists()
-        self.manager.config["share_points"][arm] = {"pulses": pulses}
+        self.manager.config["share_points"][arm] = {
+            "pulses": pulses,
+            "angles": angles
+        }
         
         # Update indicator
         if arm in self.share_point_indicators:
