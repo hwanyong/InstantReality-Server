@@ -40,11 +40,6 @@ const elements = {
     captureBtn: document.getElementById('capture-btn'),
     detectBaseBtn: document.getElementById('detect-base-btn'),
     detectGripperBtn: document.getElementById('detect-gripper-btn'),
-    // Workspace
-    workspaceCanvas: document.getElementById('workspace-canvas'),
-    statWidth: document.getElementById('stat-width'),
-    statHeight: document.getElementById('stat-height'),
-    statPoints: document.getElementById('stat-points'),
     // Calibration Quality
     qualityAccuracy: document.getElementById('quality-accuracy'),
     qualityReproj: document.getElementById('quality-reproj'),
@@ -359,68 +354,166 @@ async function detectGripper() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Workspace Visualization
+// Overlay Canvas - State & Rendering
 // ─────────────────────────────────────────────────────────────────────────────
 
-function drawWorkspaceMap(calibrationData) {
-    const canvas = elements.workspaceCanvas
-    if (!canvas) return
+const overlayState = {
+    tool: 'vertex',  // 'vertex', 'left-base', 'right-base', 'left-gripper', 'right-gripper'
+    vertices: [],    // [{x, y}, ...]
+    leftBase: null,  // {x, y}
+    rightBase: null, // {x, y}
+    leftGripper: null,   // {x, y}
+    rightGripper: null,  // {x, y}
+    dragging: null,      // {type: 'vertex'|'base'|'gripper', index: number, side: 'left'|'right'}
+}
 
-    const ctx = canvas.getContext('2d')
-    const rect = canvas.parentElement.getBoundingClientRect()
-    canvas.width = rect.width
-    canvas.height = rect.height
+const overlayCanvas = document.getElementById('overlay-canvas')
+const overlayCtx = overlayCanvas ? overlayCanvas.getContext('2d') : null
 
-    // Clear
-    ctx.fillStyle = 'var(--bg-secondary)'
-    ctx.fillRect(0, 0, canvas.width, canvas.height)
+function drawOverlay() {
+    if (!overlayCtx) return
 
-    // Draw workspace bounds
-    if (calibrationData.workspace) {
-        const ws = calibrationData.workspace
+    overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height)
 
-        // Update stats
-        if (elements.statWidth) elements.statWidth.textContent = ws.width || '--'
-        if (elements.statHeight) elements.statHeight.textContent = ws.height || '--'
-        if (elements.statPoints) elements.statPoints.textContent = calibrationData.valid_points || '--'
-
-        // Draw workspace rectangle
-        const scaleX = canvas.width / (ws.width || 600)
-        const scaleY = canvas.height / (ws.height || 400)
-        const scale = Math.min(scaleX, scaleY) * 0.8
-
-        const offsetX = (canvas.width - ws.width * scale) / 2
-        const offsetY = (canvas.height - ws.height * scale) / 2
-
-        ctx.strokeStyle = 'var(--accent)'
-        ctx.lineWidth = 2
-        ctx.strokeRect(offsetX, offsetY, ws.width * scale, ws.height * scale)
-
-        // Draw robot bases
-        if (calibrationData.left_base) {
-            drawPoint(ctx, calibrationData.left_base, offsetX, offsetY, scale, '#3fb950', 'L')
+    // Draw polygon
+    if (overlayState.vertices.length > 0) {
+        overlayCtx.beginPath()
+        overlayCtx.moveTo(overlayState.vertices[0].x, overlayState.vertices[0].y)
+        for (let i = 1; i < overlayState.vertices.length; i++) {
+            overlayCtx.lineTo(overlayState.vertices[i].x, overlayState.vertices[i].y)
         }
-        if (calibrationData.right_base) {
-            drawPoint(ctx, calibrationData.right_base, offsetX, offsetY, scale, '#f85149', 'R')
+        if (overlayState.vertices.length > 2) {
+            overlayCtx.closePath()
+            overlayCtx.fillStyle = 'rgba(100, 200, 255, 0.15)'
+            overlayCtx.fill()
+        }
+        overlayCtx.strokeStyle = '#64c8ff'
+        overlayCtx.lineWidth = 2
+        overlayCtx.stroke()
+
+        // Draw vertices
+        overlayState.vertices.forEach((v, i) => {
+            overlayCtx.beginPath()
+            overlayCtx.arc(v.x, v.y, 8, 0, Math.PI * 2)
+            overlayCtx.fillStyle = '#64c8ff'
+            overlayCtx.fill()
+            overlayCtx.fillStyle = '#000'
+            overlayCtx.font = '10px Inter, sans-serif'
+            overlayCtx.textAlign = 'center'
+            overlayCtx.textBaseline = 'middle'
+            overlayCtx.fillText(i + 1, v.x, v.y)
+        })
+    }
+
+    // Draw bases
+    if (overlayState.leftBase) {
+        drawMarker(overlayState.leftBase, '#ff6b6b', '◆', 'L')
+    }
+    if (overlayState.rightBase) {
+        drawMarker(overlayState.rightBase, '#4dabf7', '◆', 'R')
+    }
+
+    // Draw grippers
+    if (overlayState.leftGripper) {
+        drawMarker(overlayState.leftGripper, '#ff6b6b', '★', 'L')
+    }
+    if (overlayState.rightGripper) {
+        drawMarker(overlayState.rightGripper, '#4dabf7', '★', 'R')
+    }
+}
+
+function drawMarker(pos, color, symbol, label) {
+    overlayCtx.beginPath()
+    overlayCtx.arc(pos.x, pos.y, 12, 0, Math.PI * 2)
+    overlayCtx.fillStyle = color
+    overlayCtx.fill()
+    overlayCtx.strokeStyle = '#fff'
+    overlayCtx.lineWidth = 2
+    overlayCtx.stroke()
+
+    overlayCtx.fillStyle = '#fff'
+    overlayCtx.font = 'bold 12px Inter, sans-serif'
+    overlayCtx.textAlign = 'center'
+    overlayCtx.textBaseline = 'middle'
+    overlayCtx.fillText(label, pos.x, pos.y)
+}
+
+function handleOverlayClick(e) {
+    const rect = overlayCanvas.getBoundingClientRect()
+    const x = e.clientX - rect.left
+    const y = e.clientY - rect.top
+
+    switch (overlayState.tool) {
+        case 'vertex':
+            overlayState.vertices.push({ x, y })
+            break
+        case 'left-base':
+            overlayState.leftBase = { x, y }
+            break
+        case 'right-base':
+            overlayState.rightBase = { x, y }
+            break
+        case 'left-gripper':
+            overlayState.leftGripper = { x, y }
+            break
+        case 'right-gripper':
+            overlayState.rightGripper = { x, y }
+            break
+    }
+
+    drawOverlay()
+}
+
+function initOverlayTools() {
+    const toolbar = document.getElementById('overlay-toolbar')
+    if (!toolbar) return
+
+    toolbar.querySelectorAll('.tool-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const tool = btn.dataset.tool
+            if (!tool) return
+
+            // Clear all active
+            toolbar.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'))
+            btn.classList.add('active')
+            overlayState.tool = tool
+        })
+    })
+
+    // Clear button
+    const clearBtn = document.getElementById('tool-clear')
+    if (clearBtn) {
+        clearBtn.addEventListener('click', () => {
+            overlayState.vertices = []
+            overlayState.leftBase = null
+            overlayState.rightBase = null
+            overlayState.leftGripper = null
+            overlayState.rightGripper = null
+            drawOverlay()
+            showSuccess('오버레이 초기화됨')
+        })
+    }
+
+    // Canvas click
+    if (overlayCanvas) {
+        overlayCanvas.addEventListener('click', handleOverlayClick)
+    }
+}
+
+function getOverlayData() {
+    return {
+        workspace: { vertices: overlayState.vertices },
+        robotBases: {
+            left: overlayState.leftBase,
+            right: overlayState.rightBase
+        },
+        grippers: {
+            left: overlayState.leftGripper,
+            right: overlayState.rightGripper
         }
     }
 }
 
-function drawPoint(ctx, point, offsetX, offsetY, scale, color, label) {
-    const x = offsetX + point.x * scale
-    const y = offsetY + point.y * scale
-
-    ctx.beginPath()
-    ctx.arc(x, y, 8, 0, Math.PI * 2)
-    ctx.fillStyle = color
-    ctx.fill()
-
-    ctx.fillStyle = '#fff'
-    ctx.font = '12px Inter, sans-serif'
-    ctx.textAlign = 'center'
-    ctx.textBaseline = 'middle'
-    ctx.fillText(label, x, y)
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Event Listeners
@@ -457,6 +550,7 @@ function initEventListeners() {
 async function init() {
     console.log('Calibration page initializing...')
     initEventListeners()
+    initOverlayTools()
 
     try {
         await initWebRTC()

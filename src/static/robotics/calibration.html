@@ -83,6 +83,36 @@
             color: var(--text-secondary);
         }
 
+        .tool-btn {
+            transition: all 0.2s ease;
+        }
+
+        .tool-btn.active {
+            background: var(--accent);
+            color: #000;
+            font-weight: 600;
+        }
+
+        .tool-btn[data-tool="left-base"],
+        .tool-btn[data-tool="left-gripper"] {
+            border-color: #ff6b6b;
+        }
+
+        .tool-btn[data-tool="left-base"].active,
+        .tool-btn[data-tool="left-gripper"].active {
+            background: #ff6b6b;
+        }
+
+        .tool-btn[data-tool="right-base"],
+        .tool-btn[data-tool="right-gripper"] {
+            border-color: #4dabf7;
+        }
+
+        .tool-btn[data-tool="right-base"].active,
+        .tool-btn[data-tool="right-gripper"].active {
+            background: #4dabf7;
+        }
+
         .stats-grid {
             display: grid;
             grid-template-columns: repeat(3, 1fr);
@@ -180,55 +210,53 @@
                 <div class="video-section">
                     <h2>📹 Camera View <span style="font-size: 12px; color: var(--text-secondary);">(Calibration uses
                             TopView + QuarterView)</span></h2>
-                    <div class="video-grid-4" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
-                        <div class="video-wrapper">
-                            <label style="font-size: 11px; color: var(--accent);">🎯 TopView</label>
-                            <video id="camera-0" autoplay playsinline muted
-                                style="width: 390px; height: 220px; border: 2px solid var(--accent); border-radius: 4px; background: #000; object-fit: cover;"></video>
-                        </div>
-                        <div class="video-wrapper">
+
+                    <!-- TopView with Overlay -->
+                    <div id="topview-container" style="position: relative; margin-bottom: 12px;">
+                        <video id="camera-0" autoplay playsinline muted
+                            style="width: 800px; height: 450px; border: 2px solid var(--accent); border-radius: 8px; background: #000; object-fit: cover;"></video>
+                        <canvas id="overlay-canvas" width="800" height="450"
+                            style="position: absolute; top: 0; left: 0; pointer-events: auto; border-radius: 8px;"></canvas>
+                        <div id="topview-label"
+                            style="position: absolute; top: 8px; left: 12px; font-size: 12px; color: var(--accent); background: rgba(0,0,0,0.7); padding: 4px 8px; border-radius: 4px;">
+                            🎯 TopView</div>
+                    </div>
+
+                    <!-- Overlay Toolbar -->
+                    <div id="overlay-toolbar" style="display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap;">
+                        <button id="tool-vertex" class="btn tool-btn active" data-tool="vertex">⬡ Add Vertex</button>
+                        <button id="tool-left-base" class="btn tool-btn" data-tool="left-base">◆ Left Base</button>
+                        <button id="tool-right-base" class="btn tool-btn" data-tool="right-base">◆ Right Base</button>
+                        <button id="tool-left-gripper" class="btn tool-btn" data-tool="left-gripper">★ Left
+                            Gripper</button>
+                        <button id="tool-right-gripper" class="btn tool-btn" data-tool="right-gripper">★ Right
+                            Gripper</button>
+                        <button id="tool-clear" class="btn btn-danger">🗑 Clear All</button>
+                    </div>
+
+                    <!-- Secondary Cameras (horizontal) -->
+                    <div style="display: flex; gap: 8px; margin-bottom: 12px;">
+                        <div class="video-wrapper" style="flex: 1;">
                             <label style="font-size: 11px; color: var(--accent);">🎯 QuarterView</label>
                             <video id="camera-1" autoplay playsinline muted
-                                style="width: 390px; height: 220px; border: 2px solid var(--accent); border-radius: 4px; background: #000; object-fit: cover;"></video>
+                                style="width: 100%; height: 150px; border: 2px solid var(--accent); border-radius: 4px; background: #000; object-fit: cover;"></video>
                         </div>
-                        <div class="video-wrapper">
+                        <div class="video-wrapper" style="flex: 1;">
                             <label style="font-size: 11px; color: var(--text-secondary);">RightRobot</label>
                             <video id="camera-2" autoplay playsinline muted
-                                style="width: 390px; height: 220px; border: 1px solid var(--border); border-radius: 4px; background: #000; object-fit: cover;"></video>
+                                style="width: 100%; height: 150px; border: 1px solid var(--border); border-radius: 4px; background: #000; object-fit: cover;"></video>
                         </div>
-                        <div class="video-wrapper">
+                        <div class="video-wrapper" style="flex: 1;">
                             <label style="font-size: 11px; color: var(--text-secondary);">LeftRobot</label>
                             <video id="camera-3" autoplay playsinline muted
-                                style="width: 390px; height: 220px; border: 1px solid var(--border); border-radius: 4px; background: #000; object-fit: cover;"></video>
+                                style="width: 100%; height: 150px; border: 1px solid var(--border); border-radius: 4px; background: #000; object-fit: cover;"></video>
                         </div>
                     </div>
-                    <canvas id="ar-overlay" width="800" height="225" style="display: none;"></canvas>
-                    <div class="video-controls" style="margin-top: 8px;">
+
+                    <div class="video-controls">
                         <button id="capture-btn" class="btn">📷 Capture</button>
                         <button id="detect-base-btn" class="btn">🔍 Detect Robot Base</button>
                         <button id="detect-gripper-btn" class="btn">✋ Detect Gripper</button>
-                    </div>
-                </div>
-
-                <!-- Workspace Visualization -->
-                <div class="control-card" style="margin-top: var(--gap);">
-                    <h3>📐 Workspace Map</h3>
-                    <div class="workspace-viz">
-                        <canvas id="workspace-canvas"></canvas>
-                    </div>
-                    <div class="stats-grid" style="margin-top: 12px;">
-                        <div class="stat-item">
-                            <div class="stat-value" id="stat-width">--</div>
-                            <div class="stat-label">Width (mm)</div>
-                        </div>
-                        <div class="stat-item">
-                            <div class="stat-value" id="stat-height">--</div>
-                            <div class="stat-label">Height (mm)</div>
-                        </div>
-                        <div class="stat-item">
-                            <div class="stat-value" id="stat-points">--</div>
-                            <div class="stat-label">Cal Points</div>
-                        </div>
                     </div>
                 </div>
             </section>
