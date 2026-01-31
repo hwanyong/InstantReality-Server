@@ -30,6 +30,7 @@ class CameraThread:
         self.cap = cv2.VideoCapture(self.camera_index, cv2.CAP_DSHOW)
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
+        self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # Minimize buffer for low latency
         
         # Default Focus Strategy: Auto Focus ON initially
         # self.cap.set(cv2.CAP_PROP_AUTOFOCUS, 1)

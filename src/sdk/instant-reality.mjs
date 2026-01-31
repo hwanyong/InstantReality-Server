@@ -37,7 +37,7 @@ export class InstantReality {
     constructor(options = {}) {
         this.serverUrl = options.serverUrl || ''
         this.maxCameras = options.maxCameras || 4
-        this.iceServers = options.iceServers || [{ urls: 'stun:stun.l.google.com:19302' }]
+        this.iceServers = options.iceServers || []  // Local network: no STUN needed
         this.pc = null
         this.ws = null
         this.trackCounter = 0

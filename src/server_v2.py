@@ -30,6 +30,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from src.camera_manager import get_camera, get_active_cameras, init_cameras, set_camera_focus, set_camera_exposure, set_camera_auto_exposure
 from src.camera_mapping import get_index_by_role, get_available_devices, match_roles, assign_role, VALID_ROLES, save_camera_settings, get_all_settings, get_roi_config, save_roi_config
 from src.ai_engine import GeminiBrain
+import robot_api
 
 if WEBRTC_AVAILABLE:
     from src.webrtc.video_track import OpenCVVideoCapture
@@ -424,7 +425,7 @@ async def handle_offer(request):
                 logger.info(f"Created source track for camera {idx}")
             
             # Create proxy track for this client via MediaRelay
-            proxy_track = relay.subscribe(source_tracks[idx])
+            proxy_track = relay.subscribe(source_tracks[idx], buffered=False)  # Low latency mode
             sender = pc.addTrack(proxy_track)
             active_tracks[pc_id][idx] = proxy_track
             
@@ -593,6 +594,10 @@ def create_app():
         cors.add(app.router.add_route('POST', '/pause_camera', handle_pause_camera))
         app.router.add_get('/ws', handle_websocket)
         logger.info("WebRTC routes registered: /offer, /ws, /pause_camera")
+    
+    # Robot API routes
+    robot_api.setup_routes(app)
+    logger.info("Robot API routes registered: /api/robot/*")
     
     # Static files - robotics UI
     static_path = Path(__file__).parent / 'static' / 'robotics'

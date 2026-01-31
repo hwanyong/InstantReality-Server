@@ -2,7 +2,7 @@ from aiortc import VideoStreamTrack
 from av import VideoFrame
 import time
 import numpy as np
-from camera_manager import get_camera
+from src.camera_manager import get_camera
 
 class OpenCVVideoCapture(VideoStreamTrack):
     """
