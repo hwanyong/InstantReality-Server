@@ -120,6 +120,56 @@ async def handle_capture(request):
     })
 
 
+async def handle_capture_all(request):
+    """GET /api/capture_all - Capture FHD frames from all 4 cameras as ZIP"""
+    import io
+    import zipfile
+    from datetime import datetime
+    
+    # Role names for file naming
+    role_mapping = {
+        get_index_by_role('TopView'): 'TopView',
+        get_index_by_role('QuarterView'): 'QuarterView',
+        get_index_by_role('LeftRobot'): 'LeftRobot',
+        get_index_by_role('RightRobot'): 'RightRobot'
+    }
+    
+    # Create ZIP in memory
+    zip_buffer = io.BytesIO()
+    
+    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
+        for camera_index, role_name in role_mapping.items():
+            if camera_index is None:
+                continue
+                
+            cam = get_camera(camera_index)
+            if cam is None:
+                continue
+                
+            high_res, _ = cam.get_frames()
+            if high_res is None:
+                continue
+            
+            # Encode to JPEG (high quality)
+            _, jpeg_bytes = cv2.imencode('.jpg', high_res, [cv2.IMWRITE_JPEG_QUALITY, 95])
+            
+            # Add to ZIP
+            zf.writestr(f'{role_name}.jpg', jpeg_bytes.tobytes())
+    
+    zip_buffer.seek(0)
+    
+    # Generate filename with timestamp
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    filename = f'capture_{timestamp}.zip'
+    
+    return web.Response(
+        body=zip_buffer.getvalue(),
+        content_type='application/zip',
+        headers={
+            'Content-Disposition': f'attachment; filename="{filename}"'
+        }
+    )
+
 async def handle_scene_init(request):
     """POST /api/scene/init - Scan and initialize scene inventory
     
@@ -523,7 +573,7 @@ async def init_app():
             role_status[role] = None
     
     if camera_indices:
-        init_cameras(camera_indices, width=1280, height=720)
+        init_cameras(camera_indices, width=1920, height=1080)
         logger.info(f"Cameras initialized: {role_status}")
         
         # Apply saved settings to each camera
@@ -544,7 +594,7 @@ async def init_app():
                 logger.info(f"Applied settings for {role} (camera {idx})")
     else:
         # Fallback to default camera 0
-        init_cameras([0], width=1280, height=720)
+        init_cameras([0], width=1920, height=1080)
         logger.warning("No role-mapped cameras found, using default camera 0")
 
 
@@ -568,6 +618,7 @@ def create_app():
     api_routes = [
         # Scene API
         web.get('/api/capture', handle_capture),
+        web.get('/api/capture_all', handle_capture_all),
         web.post('/api/scene/init', handle_scene_init),
         web.get('/api/scene', handle_scene_get),
         # Camera Management API

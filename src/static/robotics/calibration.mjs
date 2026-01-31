@@ -297,11 +297,26 @@ async function resetCalibration() {
 // Detection
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function captureTopView() {
+async function captureAllCameras() {
+    showToast('4대 카메라 캡처 중...')
     try {
-        const data = await ir.capture(0) // TopView
-        showSuccess('TopView 캡처됨')
-        console.log('Captured:', data)
+        const res = await fetch(`${API_BASE}/api/capture_all`)
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+
+        const blob = await res.blob()
+        const filename = res.headers.get('Content-Disposition')?.match(/filename="(.+)"/)?.[1] || 'capture.zip'
+
+        // Trigger download
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = filename
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
+        URL.revokeObjectURL(url)
+
+        showSuccess('캡처 완료! ZIP 파일 다운로드됨')
     } catch (e) {
         showError(`캡처 실패: ${e.message}`)
     }
@@ -430,7 +445,7 @@ function initEventListeners() {
     if (elements.resetCalBtn) elements.resetCalBtn.addEventListener('click', resetCalibration)
 
     // Detection
-    if (elements.captureBtn) elements.captureBtn.addEventListener('click', captureTopView)
+    if (elements.captureBtn) elements.captureBtn.addEventListener('click', captureAllCameras)
     if (elements.detectBaseBtn) elements.detectBaseBtn.addEventListener('click', detectRobotBase)
     if (elements.detectGripperBtn) elements.detectGripperBtn.addEventListener('click', detectGripper)
 }

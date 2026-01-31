@@ -174,7 +174,7 @@ class CameraThread:
 # Global Manager Pattern
 _cameras = {}
 
-def init_cameras(indices, width=1280, height=720):
+def init_cameras(indices, width=1920, height=1080):
     """Initialize multiple cameras at startup. Called once when server starts."""
     print(f"Initializing cameras: {indices}")
     for idx in indices:
