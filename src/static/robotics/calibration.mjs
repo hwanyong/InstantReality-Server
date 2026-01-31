@@ -364,11 +364,35 @@ const overlayState = {
     rightBase: null, // {x, y}
     leftGripper: null,   // {x, y}
     rightGripper: null,  // {x, y}
-    dragging: null,      // {type: 'vertex'|'base'|'gripper', index: number, side: 'left'|'right'}
+    selectedVertex: null,  // index of selected vertex
+    isDragging: false,
+    dragStart: null,  // {x, y} - for click vs drag detection
 }
 
 const overlayCanvas = document.getElementById('overlay-canvas')
 const overlayCtx = overlayCanvas ? overlayCanvas.getContext('2d') : null
+
+const HIT_RADIUS = 15
+const DELETE_BTN_OFFSET = { x: 20, y: -20 }
+const DELETE_BTN_SIZE = 18
+
+function findNearestVertex(x, y) {
+    for (let i = 0; i < overlayState.vertices.length; i++) {
+        const v = overlayState.vertices[i]
+        const dist = Math.sqrt((v.x - x) ** 2 + (v.y - y) ** 2)
+        if (dist < HIT_RADIUS) return i
+    }
+    return null
+}
+
+function isClickOnDeleteBtn(x, y) {
+    if (overlayState.selectedVertex == null) return false
+    const v = overlayState.vertices[overlayState.selectedVertex]
+    if (!v) return false
+    const btnX = v.x + DELETE_BTN_OFFSET.x
+    const btnY = v.y + DELETE_BTN_OFFSET.y
+    return Math.abs(x - btnX) < DELETE_BTN_SIZE && Math.abs(y - btnY) < DELETE_BTN_SIZE
+}
 
 function drawOverlay() {
     if (!overlayCtx) return
@@ -393,15 +417,34 @@ function drawOverlay() {
 
         // Draw vertices
         overlayState.vertices.forEach((v, i) => {
+            const isSelected = overlayState.selectedVertex == i
             overlayCtx.beginPath()
-            overlayCtx.arc(v.x, v.y, 8, 0, Math.PI * 2)
-            overlayCtx.fillStyle = '#64c8ff'
+            overlayCtx.arc(v.x, v.y, isSelected ? 12 : 8, 0, Math.PI * 2)
+            overlayCtx.fillStyle = isSelected ? '#ffd43b' : '#64c8ff'
             overlayCtx.fill()
+            if (isSelected) {
+                overlayCtx.strokeStyle = '#fff'
+                overlayCtx.lineWidth = 2
+                overlayCtx.stroke()
+            }
             overlayCtx.fillStyle = '#000'
             overlayCtx.font = '10px Inter, sans-serif'
             overlayCtx.textAlign = 'center'
             overlayCtx.textBaseline = 'middle'
             overlayCtx.fillText(i + 1, v.x, v.y)
+
+            // Draw delete button for selected vertex
+            if (isSelected) {
+                const btnX = v.x + DELETE_BTN_OFFSET.x
+                const btnY = v.y + DELETE_BTN_OFFSET.y
+                overlayCtx.beginPath()
+                overlayCtx.arc(btnX, btnY, DELETE_BTN_SIZE / 2, 0, Math.PI * 2)
+                overlayCtx.fillStyle = '#f03e3e'
+                overlayCtx.fill()
+                overlayCtx.fillStyle = '#fff'
+                overlayCtx.font = 'bold 12px Inter, sans-serif'
+                overlayCtx.fillText('×', btnX, btnY)
+            }
         })
     }
 
@@ -443,9 +486,27 @@ function handleOverlayClick(e) {
     const x = e.clientX - rect.left
     const y = e.clientY - rect.top
 
+    // Check delete button click first
+    if (isClickOnDeleteBtn(x, y)) {
+        overlayState.vertices.splice(overlayState.selectedVertex, 1)
+        overlayState.selectedVertex = null
+        drawOverlay()
+        return
+    }
+
+    // Check hit on existing vertex
+    const hitIndex = findNearestVertex(x, y)
+
     switch (overlayState.tool) {
         case 'vertex':
-            overlayState.vertices.push({ x, y })
+            if (hitIndex != null) {
+                // Select or deselect vertex
+                overlayState.selectedVertex = overlayState.selectedVertex == hitIndex ? null : hitIndex
+            } else {
+                // Add new vertex
+                overlayState.vertices.push({ x, y })
+                overlayState.selectedVertex = null
+            }
             break
         case 'left-base':
             overlayState.leftBase = { x, y }
@@ -464,6 +525,96 @@ function handleOverlayClick(e) {
     drawOverlay()
 }
 
+function handleOverlayMouseDown(e) {
+    const rect = overlayCanvas.getBoundingClientRect()
+    const x = e.clientX - rect.left
+    const y = e.clientY - rect.top
+
+    overlayState.dragStart = { x, y }
+
+    if (overlayState.tool == 'vertex') {
+        const hitIndex = findNearestVertex(x, y)
+        if (hitIndex != null) {
+            overlayState.selectedVertex = hitIndex
+            overlayState.isDragging = true
+            drawOverlay()
+        }
+    }
+}
+
+function handleOverlayMouseMove(e) {
+    if (!overlayState.isDragging || overlayState.selectedVertex == null) return
+
+    const rect = overlayCanvas.getBoundingClientRect()
+    const x = e.clientX - rect.left
+    const y = e.clientY - rect.top
+
+    overlayState.vertices[overlayState.selectedVertex] = { x, y }
+    drawOverlay()
+}
+
+function handleOverlayMouseUp(e) {
+    const rect = overlayCanvas.getBoundingClientRect()
+    const x = e.clientX - rect.left
+    const y = e.clientY - rect.top
+
+    const start = overlayState.dragStart
+    const wasDragging = overlayState.isDragging
+    overlayState.isDragging = false
+    overlayState.dragStart = null
+
+    // Calculate distance to determine click vs drag
+    const distance = start ? Math.sqrt((x - start.x) ** 2 + (y - start.y) ** 2) : 0
+
+    // If moved more than 5px, it was a drag - don't process as click
+    if (distance > 5) return
+
+    // If was dragging a vertex, don't process as click (vertex already moved)
+    if (wasDragging && overlayState.selectedVertex != null) return
+
+    // Process as click
+    // Check delete button first
+    if (isClickOnDeleteBtn(x, y)) {
+        overlayState.vertices.splice(overlayState.selectedVertex, 1)
+        overlayState.selectedVertex = null
+        drawOverlay()
+        return
+    }
+
+    const hitIndex = findNearestVertex(x, y)
+
+    switch (overlayState.tool) {
+        case 'vertex':
+            if (hitIndex != null) {
+                overlayState.selectedVertex = overlayState.selectedVertex == hitIndex ? null : hitIndex
+            } else {
+                overlayState.vertices.push({ x, y })
+                overlayState.selectedVertex = null
+            }
+            break
+        case 'left-base':
+            overlayState.leftBase = { x, y }
+            break
+        case 'right-base':
+            overlayState.rightBase = { x, y }
+            break
+        case 'left-gripper':
+            overlayState.leftGripper = { x, y }
+            break
+        case 'right-gripper':
+            overlayState.rightGripper = { x, y }
+            break
+    }
+
+    drawOverlay()
+}
+
+function handleOverlayMouseLeave() {
+    // Only reset state, don't process as click
+    overlayState.isDragging = false
+    overlayState.dragStart = null
+}
+
 function initOverlayTools() {
     const toolbar = document.getElementById('overlay-toolbar')
     if (!toolbar) return
@@ -477,6 +628,8 @@ function initOverlayTools() {
             toolbar.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'))
             btn.classList.add('active')
             overlayState.tool = tool
+            overlayState.selectedVertex = null
+            drawOverlay()
         })
     })
 
@@ -489,14 +642,18 @@ function initOverlayTools() {
             overlayState.rightBase = null
             overlayState.leftGripper = null
             overlayState.rightGripper = null
+            overlayState.selectedVertex = null
             drawOverlay()
             showSuccess('오버레이 초기화됨')
         })
     }
 
-    // Canvas click
+    // Canvas events
     if (overlayCanvas) {
-        overlayCanvas.addEventListener('click', handleOverlayClick)
+        overlayCanvas.addEventListener('mousedown', handleOverlayMouseDown)
+        overlayCanvas.addEventListener('mousemove', handleOverlayMouseMove)
+        overlayCanvas.addEventListener('mouseup', handleOverlayMouseUp)
+        overlayCanvas.addEventListener('mouseleave', handleOverlayMouseLeave)
     }
 }
 
