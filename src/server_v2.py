@@ -11,10 +11,13 @@ from pathlib import Path
 
 from aiohttp import web
 import aiohttp_cors
+import cv2
+import base64
 
 # WebRTC imports
 try:
     from aiortc import RTCPeerConnection, RTCSessionDescription, RTCRtpSender
+    from aiortc.contrib.media import MediaRelay
     WEBRTC_AVAILABLE = True
 except ImportError:
     WEBRTC_AVAILABLE = False
@@ -25,10 +28,8 @@ PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.camera_manager import get_camera, get_active_cameras, init_cameras, set_camera_focus, set_camera_exposure, set_camera_auto_exposure
-from src.camera_mapping import get_index_by_role, get_available_devices, match_roles, assign_role, VALID_ROLES, get_camera_settings, save_camera_settings, get_all_settings, get_roi_config, save_roi_config
+from src.camera_mapping import get_index_by_role, get_available_devices, match_roles, assign_role, VALID_ROLES, save_camera_settings, get_all_settings, get_roi_config, save_roi_config
 from src.ai_engine import GeminiBrain
-from src.calibration_api import setup_calibration_routes
-from src.robot_api import setup_robot_routes
 
 if WEBRTC_AVAILABLE:
     from src.webrtc.video_track import OpenCVVideoCapture
@@ -43,24 +44,40 @@ SCENE_INVENTORY = []
 
 # WebRTC state
 pcs = set()  # Active PeerConnections
-active_tracks = {}  # {pc_id: {camera_index: track}}
+active_tracks = {}  # {pc_id: {camera_index: proxy_track}}
 ws_clients = set()  # WebSocket clients
 
+# MediaRelay for efficient multi-client streaming
+relay = MediaRelay() if WEBRTC_AVAILABLE else None
+source_tracks = {}  # {camera_index: OpenCVVideoCapture} - singleton per camera
 
-class CameraAdapter:
-    """Adapter to provide capture() interface for calibration API."""
+
+# =============================================================================
+# Helper Functions
+# =============================================================================
+
+def get_camera_by_role(role):
+    """
+    Get camera index by role name.
+    Returns (index, None) on success, (None, error_response) on failure.
+    """
+    idx = get_index_by_role(role)
+    if idx is None:
+        return None, web.json_response({"error": f"Role {role} not connected"}, status=404)
+    return idx, None
+
+
+def apply_exposure_settings(idx, exposure):
+    """Apply exposure settings to a camera."""
+    auto = exposure.get("auto", False)
+    value = exposure.get("value", -5)
+    target_brightness = exposure.get("target_brightness", 128)
     
-    def __init__(self, camera_index=0):
-        self.camera_index = camera_index
-        self.resolution = [1920, 1080]
-    
-    def capture(self):
-        """Capture high-res frame from camera."""
-        cam = get_camera(self.camera_index)
-        if cam is None:
-            return None
-        high_res, _ = cam.get_frames()
-        return high_res
+    if auto:
+        set_camera_auto_exposure(idx, True, target_brightness)
+    else:
+        set_camera_auto_exposure(idx, False, target_brightness)
+        set_camera_exposure(idx, value)
 
 
 # =============================================================================
@@ -69,9 +86,6 @@ class CameraAdapter:
 
 async def handle_capture(request):
     """GET /api/capture - Capture current camera frame"""
-    import cv2
-    import base64
-    
     camera_index = int(request.query.get('camera', 0))
     cameras = get_active_cameras()
     
@@ -247,18 +261,15 @@ async def handle_cameras_exposure(request):
     if not role:
         return web.json_response({"error": "role required"}, status=400)
     
-    idx = get_index_by_role(role)
-    if idx is None:
-        return web.json_response({"error": f"Role {role} not connected"}, status=404)
+    idx, err = get_camera_by_role(role)
+    if err:
+        return err
     
-    if auto:
-        set_camera_auto_exposure(idx, True, target_brightness)
-    else:
-        set_camera_auto_exposure(idx, False, target_brightness)
-        set_camera_exposure(idx, value)
+    exposure_config = {"auto": auto, "value": value, "target_brightness": target_brightness}
+    apply_exposure_settings(idx, exposure_config)
     
     # Save settings
-    save_camera_settings(role, {"exposure": {"auto": auto, "value": value, "target_brightness": target_brightness}})
+    save_camera_settings(role, {"exposure": exposure_config})
     
     return web.json_response({
         "success": True, 
@@ -288,8 +299,6 @@ async def handle_cameras_settings_save(request):
 
 async def handle_stream(request):
     """GET /api/stream/{camera} - MJPEG stream for live preview"""
-    import cv2
-    
     camera_index = int(request.match_info.get('camera', 0))
     cam = get_camera(camera_index)
     
@@ -406,19 +415,25 @@ async def handle_offer(request):
     except Exception as e:
         logger.debug(f"H.264 not available: {e}")
     
-    # ORIGINAL ORDER: Add tracks FIRST
+    # Add tracks using MediaRelay for efficient multi-client streaming
     for idx in camera_indices:
         try:
-            track = OpenCVVideoCapture(camera_index=idx, options={"width": 1920, "height": 1080})
-            sender = pc.addTrack(track)
-            active_tracks[pc_id][idx] = track
+            # Get or create singleton source track
+            if idx not in source_tracks:
+                source_tracks[idx] = OpenCVVideoCapture(camera_index=idx, options={"width": 1920, "height": 1080})
+                logger.info(f"Created source track for camera {idx}")
+            
+            # Create proxy track for this client via MediaRelay
+            proxy_track = relay.subscribe(source_tracks[idx])
+            sender = pc.addTrack(proxy_track)
+            active_tracks[pc_id][idx] = proxy_track
             
             if h264_codecs:
                 transceiver = next((t for t in pc.getTransceivers() if t.sender == sender), None)
                 if transceiver:
                     transceiver.setCodecPreferences(h264_codecs)
             
-            logger.info(f"Added track for camera {idx}")
+            logger.info(f"Added proxy track for camera {idx}")
         except Exception as e:
             logger.error(f"Failed to add track for camera {idx}: {e}")
     
@@ -463,35 +478,23 @@ async def ws_broadcast(message):
 
 
 async def handle_pause_camera(request):
-    """POST /pause_camera - Pause/resume camera track"""
+    """POST /pause_camera - Pause/resume camera track (affects all clients)"""
     data = await request.json()
     camera_index = int(data.get("camera_index", 0))
     paused = data.get("paused", True)
-    client_id = data.get("client_id")
     
-    if client_id and client_id in active_tracks:
-        if camera_index in active_tracks[client_id]:
-            active_tracks[client_id][camera_index].set_paused(paused)
-            logger.info(f"Camera {camera_index}: paused={paused}")
+    # Pause is applied to source track (affects all clients)
+    if camera_index in source_tracks:
+        source_tracks[camera_index].set_paused(paused)
+        logger.info(f"Camera {camera_index}: paused={paused} (all clients)")
     
     return web.json_response({"success": True, "camera_index": camera_index, "paused": paused})
 
 
+
 async def broadcast_camera_change(cameras):
     """Broadcast camera change to all WebSocket clients"""
-    if not ws_clients:
-        return
-    
-    msg = json.dumps({"type": "camera_change", "cameras": cameras})
-    dead_clients = set()
-    
-    for ws in ws_clients:
-        try:
-            await ws.send_str(msg)
-        except Exception:
-            dead_clients.add(ws)
-    
-    ws_clients.difference_update(dead_clients)
+    await ws_broadcast({"type": "camera_change", "cameras": cameras})
 
 
 # =============================================================================
@@ -535,11 +538,7 @@ async def init_app():
                 
                 # Apply exposure settings
                 exposure = settings.get("exposure", {})
-                if exposure.get("auto", False):
-                    set_camera_auto_exposure(idx, True, exposure.get("target_brightness", 128))
-                else:
-                    set_camera_auto_exposure(idx, False, exposure.get("target_brightness", 128))
-                    set_camera_exposure(idx, exposure.get("value", -5))
+                apply_exposure_settings(idx, exposure)
                 
                 logger.info(f"Applied settings for {role} (camera {idx})")
     else:
@@ -607,14 +606,6 @@ def create_app():
         app.router.add_static('/sdk/', sdk_path)
         logger.info(f"Serving SDK from: {sdk_path}")
     
-    # Calibration API routes - use TopView camera by default
-    topview_idx = get_index_by_role("TopView") or 0
-    setup_calibration_routes(app, camera_manager=CameraAdapter(topview_idx))
-    logger.info("Calibration API routes registered")
-    
-    # Robot Control API routes
-    setup_robot_routes(app)
-    logger.info("Robot API routes registered")
     
     # Index redirect
     async def index_redirect(request):
