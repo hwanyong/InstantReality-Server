@@ -365,54 +365,90 @@
     },
     "vertices": {
       "1": {
-        "x": 394.1,
-        "y": 153.7,
-        "owner": "left_arm"
+        "x": 189.7,
+        "y": 188.6,
+        "z": -7.0,
+        "owner": "left_arm",
+        "stance": "open",
+        "r_3d": 254.6,
+        "angles": {
+          "yaw_delta": 9.7,
+          "shoulder_delta": 26.6,
+          "elbow_delta": 20.2,
+          "internal_angle": 173.6
+        }
       },
       "2": {
-        "x": -442.9,
-        "y": 76.8,
-        "owner": "left_arm"
+        "x": -58.7,
+        "y": 218.2,
+        "z": -80.0,
+        "owner": "left_arm",
+        "stance": "closed",
+        "r_3d": 188.7,
+        "angles": {
+          "yaw_delta": 159.8,
+          "shoulder_delta": 82.2,
+          "elbow_delta": 93.8,
+          "internal_angle": 93.8
+        }
       },
       "3": {
-        "x": -394.7,
-        "y": -162.7,
-        "owner": "right_arm"
+        "x": -52.2,
+        "y": -241.8,
+        "z": -25.1,
+        "owner": "right_arm",
+        "stance": "closed",
+        "r_3d": 156.3,
+        "angles": {
+          "yaw_delta": 167.0,
+          "shoulder_delta": 57.7,
+          "elbow_delta": 73.2,
+          "internal_angle": 73.2
+        }
       },
       "4": {
-        "x": 450.5,
-        "y": -152.4,
-        "owner": "right_arm"
+        "x": 192.5,
+        "y": -218.7,
+        "z": -82.3,
+        "owner": "right_arm",
+        "stance": "open",
+        "r_3d": 253.5,
+        "angles": {
+          "yaw_delta": 14.4,
+          "shoulder_delta": 48.3,
+          "elbow_delta": 61.0,
+          "internal_angle": 167.3
+        }
       }
     },
     "distances": {
       "vertex_to_vertex": {
-        "1_2": 840.5,
-        "1_3": 849.9,
-        "1_4": 311.3,
-        "2_3": 244.3,
-        "2_4": 922.3,
-        "3_4": 845.3
+        "1_2": 250.2,
+        "1_3": 493.7,
+        "1_4": 407.3,
+        "2_3": 460.0,
+        "2_4": 504.0,
+        "3_4": 245.8
       },
       "base_to_vertex": {
         "left_arm": {
-          "1": 435.0,
-          "2": 435.0,
-          "3": 530.5,
-          "4": 615.9
+          "1": 227.7,
+          "2": 25.6,
+          "3": 469.1,
+          "4": 500.3
         },
         "right_arm": {
-          "1": 552.1,
-          "2": 580.3,
-          "3": 435.1,
-          "4": 435.0
+          "1": 477.0,
+          "2": 486.8,
+          "3": 83.5,
+          "4": 168.6
         }
       },
       "share_point_to_vertex": {
-        "1": 423.0,
-        "2": 449.5,
-        "3": 426.9,
-        "4": 475.6
+        "1": 267.5,
+        "2": 226.0,
+        "3": 247.4,
+        "4": 291.4
       },
       "base_to_base": 491.8
     }
