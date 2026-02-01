@@ -33,7 +33,7 @@ from src.ai_engine import GeminiBrain
 import robot_api
 
 if WEBRTC_AVAILABLE:
-    from src.webrtc.video_track import OpenCVVideoCapture
+    from src.webrtc.video_track import OpenCVVideoCapture, BlackVideoTrack
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -45,7 +45,7 @@ SCENE_INVENTORY = []
 
 # WebRTC state
 pcs = set()  # Active PeerConnections
-active_tracks = {}  # {pc_id: {camera_index: proxy_track}}
+active_tracks = {}  # {pc_id: {camera_index: {"track": proxy_track, "sender": sender, "paused": False}}}
 ws_clients = set()  # WebSocket clients
 
 # MediaRelay for efficient multi-client streaming
@@ -409,6 +409,35 @@ async def handle_roi_save(request):
 
 
 # =============================================================================
+# Servo Config API
+# =============================================================================
+
+async def handle_servo_config_get(request):
+    """GET /api/servo_config - Get servo configuration"""
+    config_path = PROJECT_ROOT / "servo_config.json"
+    
+    if not config_path.exists():
+        return web.json_response({"error": "servo_config.json not found"}, status=404)
+    
+    with open(config_path, 'r', encoding='utf-8') as f:
+        config = json.load(f)
+    
+    return web.json_response(config)
+
+
+async def handle_servo_config_save(request):
+    """POST /api/servo_config - Save servo configuration"""
+    data = await request.json()
+    config_path = PROJECT_ROOT / "servo_config.json"
+    
+    with open(config_path, 'w', encoding='utf-8') as f:
+        json.dump(data, f, indent=2)
+    
+    logger.info("servo_config.json saved")
+    return web.json_response({"success": True})
+
+
+# =============================================================================
 # WebRTC Handlers
 # =============================================================================
 
@@ -477,7 +506,11 @@ async def handle_offer(request):
             # Create proxy track for this client via MediaRelay
             proxy_track = relay.subscribe(source_tracks[idx], buffered=False)  # Low latency mode
             sender = pc.addTrack(proxy_track)
-            active_tracks[pc_id][idx] = proxy_track
+            active_tracks[pc_id][idx] = {
+                "track": proxy_track,
+                "sender": sender,
+                "paused": False
+            }
             
             if h264_codecs:
                 transceiver = next((t for t in pc.getTransceivers() if t.sender == sender), None)
@@ -541,6 +574,46 @@ async def handle_pause_camera(request):
     
     return web.json_response({"success": True, "camera_index": camera_index, "paused": paused})
 
+
+async def handle_pause_camera_client(request):
+    """POST /pause_camera_client - Per-client pause (bandwidth saving)"""
+    data = await request.json()
+    client_id = data.get("client_id")
+    camera_index = int(data.get("camera_index", 0))
+    paused = data.get("paused", True)
+    
+    if not client_id:
+        return web.json_response({"error": "client_id required"}, status=400)
+    
+    if client_id not in active_tracks:
+        return web.json_response({"error": "Client not found"}, status=404)
+    
+    if camera_index not in active_tracks[client_id]:
+        return web.json_response({"error": f"Camera {camera_index} not found for client"}, status=404)
+    
+    track_info = active_tracks[client_id][camera_index]
+    sender = track_info["sender"]
+    
+    if paused:
+        # Replace with minimal black track to save bandwidth
+        black_track = BlackVideoTrack()
+        sender.replaceTrack(black_track)
+        track_info["paused"] = True
+        logger.info(f"Client {client_id}: camera {camera_index} paused (per-client)")
+    else:
+        # Restore original proxy track
+        new_proxy = relay.subscribe(source_tracks[camera_index], buffered=False)
+        sender.replaceTrack(new_proxy)
+        track_info["track"] = new_proxy
+        track_info["paused"] = False
+        logger.info(f"Client {client_id}: camera {camera_index} resumed (per-client)")
+    
+    return web.json_response({
+        "success": True,
+        "client_id": client_id,
+        "camera_index": camera_index,
+        "paused": paused
+    })
 
 
 async def broadcast_camera_change(cameras):
@@ -634,6 +707,9 @@ def create_app():
         # ROI API
         web.get('/api/roi', handle_roi_get),
         web.post('/api/roi', handle_roi_save),
+        # Servo Config API
+        web.get('/api/servo_config', handle_servo_config_get),
+        web.post('/api/servo_config', handle_servo_config_save),
     ]
     
     for route in api_routes:
@@ -643,8 +719,9 @@ def create_app():
     if WEBRTC_AVAILABLE:
         cors.add(app.router.add_route('POST', '/offer', handle_offer))
         cors.add(app.router.add_route('POST', '/pause_camera', handle_pause_camera))
+        cors.add(app.router.add_route('POST', '/pause_camera_client', handle_pause_camera_client))
         app.router.add_get('/ws', handle_websocket)
-        logger.info("WebRTC routes registered: /offer, /ws, /pause_camera")
+        logger.info("WebRTC routes registered: /offer, /ws, /pause_camera, /pause_camera_client")
     
     # Robot API routes
     robot_api.setup_routes(app)

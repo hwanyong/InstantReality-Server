@@ -36,7 +36,11 @@ const elements = {
     jsonPreview: document.getElementById('json-preview'),
     // Tab elements
     tabButtons: document.querySelectorAll('.tab-btn'),
-    tabPanels: document.querySelectorAll('.tab-panel')
+    tabPanels: document.querySelectorAll('.tab-panel'),
+    // Toolbar buttons
+    loadCalBtn: document.getElementById('load-cal-btn'),
+    saveCalBtn: document.getElementById('save-cal-btn'),
+    exportCalBtn: document.getElementById('export-cal-btn')
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -68,7 +72,77 @@ async function initWebRTC() {
     // Connect with specific roles
     await ir.connect({ roles: ROLES })
 
+    // Initialize pause buttons after connection
+    initPauseButtons()
+}
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Camera Pause (Per-Client)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const pausedCameras = new Set()
+
+async function toggleCameraPause(cameraIndex) {
+    if (!ir || !ir.clientId) {
+        showError('WebRTC 연결 필요')
+        return
+    }
+
+    const paused = !pausedCameras.has(cameraIndex)
+
+    try {
+        const res = await fetch(`${API_BASE}/pause_camera_client`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                client_id: ir.clientId,
+                camera_index: cameraIndex,
+                paused: paused
+            })
+        })
+
+        if (!res.ok) {
+            throw new Error(`HTTP ${res.status}`)
+        }
+
+        if (paused) {
+            pausedCameras.add(cameraIndex)
+            showToast(`카메라 ${cameraIndex} 일시정지됨`)
+        } else {
+            pausedCameras.delete(cameraIndex)
+            showToast(`카메라 ${cameraIndex} 재개됨`)
+        }
+
+        updatePauseButtonState(cameraIndex)
+    } catch (e) {
+        console.error('Failed to toggle pause:', e)
+        showError(`일시정지 실패: ${e.message}`)
+    }
+}
+
+function updatePauseButtonState(cameraIndex) {
+    const btn = document.querySelector(`.pause-btn[data-camera="${cameraIndex}"]`)
+    if (!btn) return
+
+    if (pausedCameras.has(cameraIndex)) {
+        btn.classList.add('paused')
+        btn.textContent = '▶'
+        btn.title = '재생'
+    } else {
+        btn.classList.remove('paused')
+        btn.textContent = '⏸'
+        btn.title = '일시정지'
+    }
+}
+
+function initPauseButtons() {
+    document.querySelectorAll('.pause-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation()
+            const cameraIndex = parseInt(btn.dataset.camera)
+            toggleCameraPause(cameraIndex)
+        })
+    })
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -551,6 +625,15 @@ function initEventListeners() {
             elements.speedValue.textContent = `${elements.motionSpeed.value}s`
         })
     }
+
+    // Load button - reload servo config
+    if (elements.loadCalBtn) {
+        elements.loadCalBtn.addEventListener('click', async () => {
+            showToast('설정 불러오는 중...')
+            await loadServoConfig()
+            showSuccess('설정 로드 완료')
+        })
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -613,6 +696,41 @@ function initCanvasResize() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Servo Config API
+// ─────────────────────────────────────────────────────────────────────────────
+
+let servoConfig = null
+
+async function loadServoConfig() {
+    try {
+        const res = await fetch(`${API_BASE}/api/servo_config`)
+        if (!res.ok) {
+            throw new Error(`HTTP ${res.status}`)
+        }
+        servoConfig = await res.json()
+        updateJsonPreview()
+        console.log('Servo config loaded')
+        return servoConfig
+    } catch (e) {
+        console.error('Failed to load servo config:', e)
+        if (elements.jsonPreview) {
+            elements.jsonPreview.textContent = `Failed to load: ${e.message}`
+        }
+        return null
+    }
+}
+
+function updateJsonPreview() {
+    if (!elements.jsonPreview) return
+
+    if (servoConfig) {
+        elements.jsonPreview.textContent = JSON.stringify(servoConfig, null, 2)
+    } else {
+        elements.jsonPreview.textContent = 'No calibration data'
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Initialize
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -622,6 +740,9 @@ async function init() {
     initOverlayTools()
     initTabs()
     initCanvasResize()
+
+    // Load servo config for JSON preview
+    await loadServoConfig()
 
     try {
         await initWebRTC()

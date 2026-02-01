@@ -175,6 +175,28 @@
             border-color: var(--accent);
         }
 
+        .pause-btn {
+            background: transparent;
+            border: none;
+            color: var(--text-secondary);
+            cursor: pointer;
+            font-size: 12px;
+            padding: 2px 6px;
+            border-radius: 4px;
+            transition: all 0.2s;
+            margin-left: 6px;
+        }
+
+        .pause-btn:hover {
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+        }
+
+        .pause-btn.paused {
+            color: var(--warning);
+            background: var(--bg-tertiary);
+        }
+
         /* Tabs */
         .dock-tabs {
             display: flex;
@@ -330,7 +352,7 @@
             </section>
 
             <!-- Main Toolbar -->
-            <div class="main-toolbar">
+            <div id="overlay-toolbar" class="main-toolbar">
                 <button id="tool-vertex" class="tool-btn active" data-tool="vertex">⬡ Add Vertex</button>
                 <button id="tool-left-base" class="tool-btn" data-tool="left-base">◆ Left Base</button>
                 <button id="tool-right-base" class="tool-btn" data-tool="right-base">◆ Right Base</button>
@@ -350,15 +372,15 @@
                 <!-- Sub Cameras -->
                 <div class="dock-cameras">
                     <div class="camera-item">
-                        <label>🎯 QuarterView</label>
+                        <label>🎯 QuarterView <button class="pause-btn" data-camera="1" title="일시정지">⏸</button></label>
                         <video id="camera-1" autoplay playsinline muted></video>
                     </div>
                     <div class="camera-item">
-                        <label>RightRobot</label>
+                        <label>RightRobot <button class="pause-btn" data-camera="2" title="일시정지">⏸</button></label>
                         <video id="camera-2" autoplay playsinline muted></video>
                     </div>
                     <div class="camera-item">
-                        <label>LeftRobot</label>
+                        <label>LeftRobot <button class="pause-btn" data-camera="3" title="일시정지">⏸</button></label>
                         <video id="camera-3" autoplay playsinline muted></video>
                     </div>
                 </div>

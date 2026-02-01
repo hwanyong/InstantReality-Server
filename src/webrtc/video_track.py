@@ -49,3 +49,19 @@ class OpenCVVideoCapture(VideoStreamTrack):
         # But per current architecture, we can leave it running.
         super().stop()
 
+
+class BlackVideoTrack(VideoStreamTrack):
+    """
+    A minimal VideoStreamTrack that yields tiny black frames.
+    Used for per-client pause to save bandwidth.
+    """
+    def __init__(self):
+        super().__init__()
+        self._black_frame = np.zeros((16, 16, 3), dtype=np.uint8)
+    
+    async def recv(self):
+        pts, time_base = await self.next_timestamp()
+        video_frame = VideoFrame.from_ndarray(self._black_frame, format="rgb24")
+        video_frame.pts = pts
+        video_frame.time_base = time_base
+        return video_frame
