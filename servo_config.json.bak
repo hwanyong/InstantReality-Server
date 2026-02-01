@@ -77,7 +77,7 @@
       "type": "roll",
       "min_pos": "ccw",
       "initial": 3.6,
-      "length": 30.0,
+      "length": 0.0,
       "zero_offset": 3.6,
       "actuation_range": 180,
       "pulse_min": 500,
@@ -95,7 +95,7 @@
       "type": "gripper",
       "min_pos": "open",
       "initial": 0.0,
-      "length": 70.0,
+      "length": 115.0,
       "zero_offset": 0.0,
       "actuation_range": 180,
       "pulse_min": 500,
@@ -185,7 +185,7 @@
       "type": "roll",
       "min_pos": "ccw",
       "initial": 7.2,
-      "length": 30.0,
+      "length": 0.0,
       "zero_offset": 7.2,
       "actuation_range": 180,
       "pulse_min": 500,
@@ -203,7 +203,7 @@
       "type": "gripper",
       "min_pos": "open",
       "initial": 126.4,
-      "length": 70.0,
+      "length": 115.0,
       "zero_offset": 126.4,
       "actuation_range": 180,
       "pulse_min": 500,
@@ -242,7 +242,7 @@
       "owner": "left_arm",
       "pulses": {
         "slot_1": 791,
-        "slot_2": 2192,
+        "slot_2": 2215,
         "slot_3": 2211,
         "slot_4": 1677,
         "slot_5": 580,
@@ -250,7 +250,7 @@
       },
       "angles": {
         "slot_1": 20.2,
-        "slot_2": 228.4,
+        "slot_2": 231.5,
         "slot_3": 231.0,
         "slot_4": 105.9,
         "slot_5": 7.2,
@@ -336,6 +336,85 @@
         "slot_5": 3.6,
         "slot_6": 67.5
       }
+    }
+  },
+  "geometry": {
+    "coordinate_system": "+X=up, +Y=left",
+    "origin": "share_point",
+    "share_points": {
+      "left_arm": {
+        "x": 0.0,
+        "y": 0.0
+      },
+      "right_arm": {
+        "x": 0.0,
+        "y": 0.0
+      }
+    },
+    "bases": {
+      "left_arm": {
+        "x": -34.7,
+        "y": 227.0,
+        "sources": 1
+      },
+      "right_arm": {
+        "x": 29.2,
+        "y": -260.6,
+        "sources": 1
+      }
+    },
+    "vertices": {
+      "1": {
+        "x": 394.1,
+        "y": 153.7,
+        "owner": "left_arm"
+      },
+      "2": {
+        "x": -442.9,
+        "y": 76.8,
+        "owner": "left_arm"
+      },
+      "3": {
+        "x": -394.7,
+        "y": -162.7,
+        "owner": "right_arm"
+      },
+      "4": {
+        "x": 450.5,
+        "y": -152.4,
+        "owner": "right_arm"
+      }
+    },
+    "distances": {
+      "vertex_to_vertex": {
+        "1_2": 840.5,
+        "1_3": 849.9,
+        "1_4": 311.3,
+        "2_3": 244.3,
+        "2_4": 922.3,
+        "3_4": 845.3
+      },
+      "base_to_vertex": {
+        "left_arm": {
+          "1": 435.0,
+          "2": 435.0,
+          "3": 530.5,
+          "4": 615.9
+        },
+        "right_arm": {
+          "1": 552.1,
+          "2": 580.3,
+          "3": 435.1,
+          "4": 435.0
+        }
+      },
+      "share_point_to_vertex": {
+        "1": 423.0,
+        "2": 449.5,
+        "3": 426.9,
+        "4": 475.6
+      },
+      "base_to_base": 491.8
     }
   }
 }
