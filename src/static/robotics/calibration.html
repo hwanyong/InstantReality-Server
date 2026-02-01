@@ -8,88 +8,95 @@
     <meta name="description" content="AI-powered automatic robot calibration using Gemini vision">
     <link rel="stylesheet" href="styles.css">
     <style>
-        /* Additional styles for calibration page */
-        .calibration-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: var(--gap);
-        }
-
-        @media (max-width: 1200px) {
-            .calibration-grid {
-                grid-template-columns: 1fr;
-            }
-        }
-
-        .progress-container {
-            background: var(--bg-secondary);
-            border-radius: 8px;
-            height: 8px;
-            margin: 12px 0;
-            overflow: hidden;
-        }
-
-        .progress-bar {
-            height: 100%;
-            background: var(--gradient-accent);
-            width: 0%;
-            transition: width 0.3s ease;
-        }
-
-        .calibration-status {
-            font-size: 0.875rem;
-            color: var(--text-secondary);
-            margin-bottom: 8px;
-        }
-
-        .calibration-step {
-            padding: 12px;
-            background: var(--bg-secondary);
-            border-radius: 8px;
-            margin-bottom: 8px;
+        /* Layout C - Bottom Docked */
+        .layout-c {
             display: flex;
-            align-items: center;
-            gap: 12px;
+            flex-direction: column;
+            height: calc(100vh - 60px);
+            padding: 0;
         }
 
-        .calibration-step.active {
-            border-left: 3px solid var(--accent);
-        }
-
-        .calibration-step.done {
-            opacity: 0.7;
-        }
-
-        .calibration-step.done::before {
-            content: '✓';
-            color: var(--success);
-            font-weight: bold;
-        }
-
-        .step-icon {
-            font-size: 1.5rem;
-        }
-
-        .step-content {
+        /* TopView Area */
+        .topview-area {
             flex: 1;
+            min-height: 0;
+            padding: 16px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background: var(--bg-primary);
         }
 
-        .step-title {
-            font-weight: 500;
+        #topview-container {
+            position: relative;
+            width: 100%;
+            height: 100%;
         }
 
-        .step-desc {
-            font-size: 0.75rem;
-            color: var(--text-secondary);
+        #topview-container video {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            border: 2px solid var(--accent);
+            border-radius: 8px;
+            background: #000;
+        }
+
+        #topview-container canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: auto;
+            border-radius: 8px;
+        }
+
+        #topview-label {
+            position: absolute;
+            top: 12px;
+            left: 16px;
+            font-size: 12px;
+            color: var(--accent);
+            background: rgba(0, 0, 0, 0.7);
+            padding: 4px 10px;
+            border-radius: 4px;
+        }
+
+        /* Main Toolbar */
+        .main-toolbar {
+            display: flex;
+            justify-content: center;
+            flex-wrap: wrap;
+            gap: 8px;
+            padding: 12px 16px;
+            background: var(--bg-secondary);
+            border-top: 1px solid var(--border-color);
         }
 
         .tool-btn {
-            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 14px;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            color: var(--text-primary);
+            font-size: 0.85rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .tool-btn:hover {
+            background: var(--bg-secondary);
+            border-color: var(--accent);
         }
 
         .tool-btn.active {
             background: var(--accent);
             color: #000;
+            border-color: var(--accent);
             font-weight: 600;
         }
 
@@ -101,6 +108,7 @@
         .tool-btn[data-tool="left-base"].active,
         .tool-btn[data-tool="left-gripper"].active {
             background: #ff6b6b;
+            border-color: #ff6b6b;
         }
 
         .tool-btn[data-tool="right-base"],
@@ -111,43 +119,175 @@
         .tool-btn[data-tool="right-base"].active,
         .tool-btn[data-tool="right-gripper"].active {
             background: #4dabf7;
+            border-color: #4dabf7;
         }
 
-        .stats-grid {
+        .toolbar-divider {
+            width: 1px;
+            background: var(--border-color);
+            margin: 0 8px;
+            align-self: stretch;
+        }
+
+        /* Bottom Dock */
+        .bottom-dock {
+            height: 260px;
             display: grid;
-            grid-template-columns: repeat(3, 1fr);
+            grid-template-columns: minmax(400px, 45%) 1fr;
+            gap: 16px;
+            padding: 12px 16px;
+            background: var(--bg-card);
+            border-top: 1px solid var(--border-color);
+        }
+
+        /* Sub Cameras */
+        .dock-cameras {
+            display: flex;
+            flex-direction: row;
             gap: 12px;
+            overflow: hidden;
         }
 
-        .stat-item {
-            text-align: center;
-            padding: 12px;
-            background: var(--bg-secondary);
-            border-radius: 8px;
+        .dock-cameras .camera-item {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            min-width: 0;
         }
 
-        .stat-value {
-            font-size: 1.5rem;
-            font-weight: bold;
-            color: var(--accent);
-        }
-
-        .stat-label {
-            font-size: 0.75rem;
+        .dock-cameras label {
+            font-size: 11px;
             color: var(--text-secondary);
+            font-weight: 500;
         }
 
-        .json-preview {
+        .dock-cameras video {
+            width: 100%;
+            aspect-ratio: 4/3;
+            border-radius: 6px;
+            object-fit: cover;
+            background: #000;
+            border: 2px solid var(--border-color);
+        }
+
+        .dock-cameras .camera-item:first-child video {
+            border-color: var(--accent);
+        }
+
+        /* Tabs */
+        .dock-tabs {
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+        }
+
+        .tab-buttons {
+            display: flex;
+            gap: 4px;
+            margin-bottom: 8px;
+        }
+
+        .tab-btn {
+            padding: 8px 16px;
+            background: var(--bg-secondary);
+            border: none;
+            border-radius: 6px 6px 0 0;
+            color: var(--text-secondary);
+            cursor: pointer;
+            font-size: 0.8rem;
+            transition: all 0.2s;
+        }
+
+        .tab-btn:hover {
+            background: var(--bg-primary);
+        }
+
+        .tab-btn.active {
+            background: var(--accent);
+            color: #000;
+            font-weight: 600;
+        }
+
+        .tab-content {
+            flex: 1;
+            overflow: hidden;
+            background: var(--bg-secondary);
+            border-radius: 0 8px 8px 8px;
+            padding: 12px;
+        }
+
+        .tab-panel {
+            display: none;
+            height: 100%;
+            overflow-y: auto;
+        }
+
+        .tab-panel.active {
+            display: block;
+        }
+
+        /* Robot Control Tab */
+        .robot-control-compact {
+            display: flex;
+            gap: 12px;
+            align-items: flex-start;
+        }
+
+        .robot-control-compact .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .robot-control-compact .btn-row {
+            display: flex;
+            gap: 6px;
+        }
+
+        .robot-control-compact .btn {
+            padding: 6px 12px;
+            font-size: 0.75rem;
+        }
+
+        .robot-status-inline {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            padding: 4px 8px;
+            background: var(--bg-card);
+            border-radius: 4px;
+        }
+
+        .speed-control {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .speed-control input[type="range"] {
+            width: 100px;
+            accent-color: var(--accent);
+        }
+
+        .speed-control span {
+            font-size: 0.75rem;
+            min-width: 30px;
+        }
+
+        /* JSON Preview Tab */
+        .json-preview-tab {
+            height: 100%;
             font-family: 'Consolas', monospace;
             font-size: 0.7rem;
-            background: var(--bg-secondary);
-            padding: 12px;
-            border-radius: 8px;
-            max-height: 200px;
+            background: var(--bg-card);
+            padding: 10px;
+            border-radius: 6px;
             overflow: auto;
             white-space: pre-wrap;
+            margin: 0;
         }
 
+        /* Nav Links */
         .nav-links {
             display: flex;
             gap: 12px;
@@ -161,30 +301,6 @@
 
         .nav-links a:hover {
             text-decoration: underline;
-        }
-
-        .workspace-viz {
-            position: relative;
-            width: 100%;
-            aspect-ratio: 1.2;
-            background: var(--bg-secondary);
-            border-radius: 8px;
-            overflow: hidden;
-        }
-
-        .workspace-viz canvas {
-            width: 100%;
-            height: 100%;
-        }
-
-        .btn-group {
-            display: flex;
-            gap: 8px;
-            margin-top: 12px;
-        }
-
-        .btn-group .btn {
-            flex: 1;
         }
     </style>
 </head>
@@ -203,190 +319,86 @@
             </div>
         </header>
 
-        <main class="main-content calibration-grid">
-            <!-- Left Panel: Camera + Visualization -->
-            <section>
-                <!-- Camera View -->
-                <div class="video-section">
-                    <h2>📹 Camera View <span style="font-size: 12px; color: var(--text-secondary);">(Calibration uses
-                            TopView + QuarterView)</span></h2>
-
-                    <!-- TopView with Overlay -->
-                    <div id="topview-container" style="position: relative; margin-bottom: 12px;">
-                        <video id="camera-0" autoplay playsinline muted
-                            style="width: 800px; height: 450px; border: 2px solid var(--accent); border-radius: 8px; background: #000; object-fit: cover;"></video>
-                        <canvas id="overlay-canvas" width="800" height="450"
-                            style="position: absolute; top: 0; left: 0; pointer-events: auto; border-radius: 8px;"></canvas>
-                        <div id="topview-label"
-                            style="position: absolute; top: 8px; left: 12px; font-size: 12px; color: var(--accent); background: rgba(0,0,0,0.7); padding: 4px 8px; border-radius: 4px;">
-                            🎯 TopView</div>
-                    </div>
-
-                    <!-- Overlay Toolbar -->
-                    <div id="overlay-toolbar" style="display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap;">
-                        <button id="tool-vertex" class="btn tool-btn active" data-tool="vertex">⬡ Add Vertex</button>
-                        <button id="tool-left-base" class="btn tool-btn" data-tool="left-base">◆ Left Base</button>
-                        <button id="tool-right-base" class="btn tool-btn" data-tool="right-base">◆ Right Base</button>
-                        <button id="tool-left-gripper" class="btn tool-btn" data-tool="left-gripper">★ Left
-                            Gripper</button>
-                        <button id="tool-right-gripper" class="btn tool-btn" data-tool="right-gripper">★ Right
-                            Gripper</button>
-                        <button id="tool-clear" class="btn btn-danger">🗑 Clear All</button>
-                    </div>
-
-                    <!-- Secondary Cameras (horizontal) -->
-                    <div style="display: flex; gap: 8px; margin-bottom: 12px;">
-                        <div class="video-wrapper" style="flex: 1;">
-                            <label style="font-size: 11px; color: var(--accent);">🎯 QuarterView</label>
-                            <video id="camera-1" autoplay playsinline muted
-                                style="width: 100%; height: 150px; border: 2px solid var(--accent); border-radius: 4px; background: #000; object-fit: cover;"></video>
-                        </div>
-                        <div class="video-wrapper" style="flex: 1;">
-                            <label style="font-size: 11px; color: var(--text-secondary);">RightRobot</label>
-                            <video id="camera-2" autoplay playsinline muted
-                                style="width: 100%; height: 150px; border: 1px solid var(--border); border-radius: 4px; background: #000; object-fit: cover;"></video>
-                        </div>
-                        <div class="video-wrapper" style="flex: 1;">
-                            <label style="font-size: 11px; color: var(--text-secondary);">LeftRobot</label>
-                            <video id="camera-3" autoplay playsinline muted
-                                style="width: 100%; height: 150px; border: 1px solid var(--border); border-radius: 4px; background: #000; object-fit: cover;"></video>
-                        </div>
-                    </div>
-
-                    <div class="video-controls">
-                        <button id="capture-btn" class="btn">📷 Capture</button>
-                        <button id="detect-base-btn" class="btn">🔍 Detect Robot Base</button>
-                        <button id="detect-gripper-btn" class="btn">✋ Detect Gripper</button>
-                    </div>
+        <main class="layout-c">
+            <!-- TopView Area -->
+            <section class="topview-area">
+                <div id="topview-container">
+                    <video id="camera-0" autoplay playsinline muted></video>
+                    <canvas id="overlay-canvas"></canvas>
+                    <div id="topview-label">🎯 TopView</div>
                 </div>
             </section>
 
-            <!-- Right Panel: Calibration Controls -->
-            <section class="control-section">
-                <!-- Robot Connection Test -->
-                <div class="control-card">
-                    <h3>🤖 Robot Control</h3>
-                    <p style="font-size: 0.75rem; color: var(--text-secondary); margin-bottom: 12px;">
-                        로봇 연결 및 포지션 제어 테스트
-                    </p>
+            <!-- Main Toolbar -->
+            <div class="main-toolbar">
+                <button id="tool-vertex" class="tool-btn active" data-tool="vertex">⬡ Add Vertex</button>
+                <button id="tool-left-base" class="tool-btn" data-tool="left-base">◆ Left Base</button>
+                <button id="tool-right-base" class="tool-btn" data-tool="right-base">◆ Right Base</button>
+                <button id="tool-left-gripper" class="tool-btn" data-tool="left-gripper">★ Left Gripper</button>
+                <button id="tool-right-gripper" class="tool-btn" data-tool="right-gripper">★ Right Gripper</button>
+                <button id="tool-clear" class="tool-btn" style="border-color: var(--danger);">🗑 Clear All</button>
 
-                    <div class="calibration-status" id="robot-status">Disconnected</div>
+                <div class="toolbar-divider"></div>
 
-                    <div class="btn-group">
-                        <button id="robot-connect-btn" class="btn-primary">🔌 Connect</button>
-                        <button id="robot-disconnect-btn" class="btn-danger" disabled>⛔ Disconnect</button>
+                <button id="load-cal-btn" class="tool-btn">📂 Load</button>
+                <button id="save-cal-btn" class="tool-btn">💾 Save</button>
+                <button id="export-cal-btn" class="tool-btn">📤 Export</button>
+            </div>
+
+            <!-- Bottom Dock -->
+            <section class="bottom-dock">
+                <!-- Sub Cameras -->
+                <div class="dock-cameras">
+                    <div class="camera-item">
+                        <label>🎯 QuarterView</label>
+                        <video id="camera-1" autoplay playsinline muted></video>
                     </div>
-                    <div class="btn-group" style="margin-top: 8px;">
-                        <button id="go-home-btn" class="btn" disabled>🏠 Go Home</button>
-                        <button id="go-zero-btn" class="btn" disabled>📐 Go to Zero</button>
+                    <div class="camera-item">
+                        <label>RightRobot</label>
+                        <video id="camera-2" autoplay playsinline muted></video>
                     </div>
-                    <div class="control-row" style="margin-top: 12px;">
-                        <label style="font-size: 0.75rem; color: var(--text-secondary);">모션 속도</label>
-                        <div style="display: flex; align-items: center; gap: 8px; margin-top: 4px;">
-                            <input type="range" id="motion-speed" min="0.5" max="5" step="0.5" value="3"
-                                style="flex: 1; accent-color: var(--accent);">
-                            <span id="speed-value" style="font-size: 0.85rem; min-width: 35px;">3초</span>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Auto-Calibration -->
-                <div class="control-card">
-                    <h3>🎯 Auto-Calibration</h3>
-                    <p style="font-size: 0.75rem; color: var(--text-secondary); margin-bottom: 12px;">
-                        AI가 로봇 위치를 자동 감지하고 카메라-로봇 좌표 변환을 계산합니다.
-                    </p>
-
-                    <div class="calibration-status" id="cal-status">Ready to calibrate</div>
-                    <div class="progress-container">
-                        <div class="progress-bar" id="cal-progress"></div>
-                    </div>
-
-                    <!-- Calibration Steps -->
-                    <div id="cal-steps">
-                        <div class="calibration-step" id="step-1">
-                            <span class="step-icon">🏠</span>
-                            <div class="step-content">
-                                <div class="step-title">Phase 0: 초기화</div>
-                                <div class="step-desc">Home 이동 및 4카메라 확인</div>
-                            </div>
-                        </div>
-                        <div class="calibration-step" id="step-2">
-                            <span class="step-icon">📐</span>
-                            <div class="step-content">
-                                <div class="step-title">Phase 1: TopView Homography</div>
-                                <div class="step-desc">FK 기반 9포인트 자기 탐색</div>
-                            </div>
-                        </div>
-                        <div class="calibration-step" id="step-3">
-                            <span class="step-icon">📏</span>
-                            <div class="step-content">
-                                <div class="step-title">Phase 2: Z-Height 캘리브레이션</div>
-                                <div class="step-desc">QuarterView로 4단계 높이 매핑</div>
-                            </div>
-                        </div>
-                        <div class="calibration-step" id="step-4">
-                            <span class="step-icon">✅</span>
-                            <div class="step-content">
-                                <div class="step-title">Phase 3: 교차 검증</div>
-                                <div class="step-desc">RobotCamera 정밀도 확인</div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="btn-group">
-                        <button id="start-cal-btn" class="btn-primary">🚀 Start Calibration</button>
-                        <button id="stop-cal-btn" class="btn-danger" disabled>⏹ Stop</button>
+                    <div class="camera-item">
+                        <label>LeftRobot</label>
+                        <video id="camera-3" autoplay playsinline muted></video>
                     </div>
                 </div>
 
-                <!-- Manual Grid Control (Hidden - Zero-Reference uses automatic positioning) -->
-                <div class="control-card" style="display: none;">
-                    <h3>🎛️ Manual Grid Control</h3>
-                    <div class="ik-inputs">
-                        <label>Grid Size:
-                            <select id="grid-size">
-                                <option value="4">2×2 (4점)</option>
-                                <option value="9" selected>3×3 (9점)</option>
-                                <option value="16">4×4 (16점)</option>
-                            </select>
-                        </label>
-                        <label>Z Height:
-                            <input type="number" id="cal-z" value="120" step="10">
-                        </label>
+                <!-- Tabs -->
+                <div class="dock-tabs">
+                    <div class="tab-buttons">
+                        <button class="tab-btn" data-tab="robot">🤖 Robot Control</button>
+                        <button class="tab-btn active" data-tab="json">💾 JSON Preview</button>
                     </div>
-                    <button id="test-grid-btn" class="btn">📍 Preview Grid Points</button>
-                </div>
+                    <div class="tab-content">
+                        <!-- Robot Control Tab -->
+                        <div id="tab-robot" class="tab-panel">
+                            <div class="robot-control-compact">
+                                <div class="control-group">
+                                    <span id="robot-status" class="robot-status-inline">Disconnected</span>
+                                    <div class="btn-row">
+                                        <button id="robot-connect-btn" class="btn btn-primary">🔌 Connect</button>
+                                        <button id="robot-disconnect-btn" class="btn btn-danger" disabled>⛔
+                                            Disconnect</button>
+                                    </div>
+                                </div>
+                                <div class="control-group">
+                                    <div class="btn-row">
+                                        <button id="go-home-btn" class="btn" disabled>🏠 Home</button>
+                                        <button id="go-zero-btn" class="btn" disabled>📐 Zero</button>
+                                    </div>
+                                    <div class="speed-control">
+                                        <label style="font-size: 0.7rem; color: var(--text-secondary);">Speed:</label>
+                                        <input type="range" id="motion-speed" min="0.5" max="5" step="0.5" value="3">
+                                        <span id="speed-value">3s</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
 
-                <!-- Calibration Quality -->
-                <div class="control-card">
-                    <h3>📊 Calibration Quality</h3>
-                    <div class="stats-grid">
-                        <div class="stat-item">
-                            <div class="stat-value" id="stat-mean-err">--</div>
-                            <div class="stat-label">Mean Error (mm)</div>
+                        <!-- JSON Preview Tab (default) -->
+                        <div id="tab-json" class="tab-panel active">
+                            <pre id="json-preview" class="json-preview-tab">No calibration data</pre>
                         </div>
-                        <div class="stat-item">
-                            <div class="stat-value" id="stat-max-err">--</div>
-                            <div class="stat-label">Max Error (mm)</div>
-                        </div>
-                        <div class="stat-item">
-                            <div class="stat-value" id="stat-status">❓</div>
-                            <div class="stat-label">Status</div>
-                        </div>
-                    </div>
-                    <button id="verify-cal-btn" class="btn" style="width: 100%; margin-top: 12px;">🔬 Verify
-                        Calibration</button>
-                </div>
-
-                <!-- Calibration Data -->
-                <div class="control-card">
-                    <h3>💾 calibration.json</h3>
-                    <pre id="json-preview" class="json-preview">No calibration data</pre>
-                    <div class="btn-group">
-                        <button id="load-cal-btn" class="btn">📂 Load</button>
-                        <button id="save-cal-btn" class="btn">💾 Save</button>
-                        <button id="export-cal-btn" class="btn">📤 Export</button>
                     </div>
                 </div>
             </section>

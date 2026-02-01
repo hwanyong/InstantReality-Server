@@ -31,21 +31,12 @@ const elements = {
     goZeroBtn: document.getElementById('go-zero-btn'),
     motionSpeed: document.getElementById('motion-speed'),
     speedValue: document.getElementById('speed-value'),
-    // Calibration
-    calStatus: document.getElementById('cal-status'),
-    calProgress: document.getElementById('cal-progress'),
-    startCalBtn: document.getElementById('start-cal-btn'),
-    resetCalBtn: document.getElementById('reset-cal-btn'),
-    // Detection
-    captureBtn: document.getElementById('capture-btn'),
-    detectBaseBtn: document.getElementById('detect-base-btn'),
-    detectGripperBtn: document.getElementById('detect-gripper-btn'),
-    // Calibration Quality
-    qualityAccuracy: document.getElementById('quality-accuracy'),
-    qualityReproj: document.getElementById('quality-reproj'),
-    qualityPoints: document.getElementById('quality-points'),
+
     // JSON preview
-    jsonPreview: document.getElementById('json-preview')
+    jsonPreview: document.getElementById('json-preview'),
+    // Tab elements
+    tabButtons: document.querySelectorAll('.tab-btn'),
+    tabPanels: document.querySelectorAll('.tab-panel')
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -77,20 +68,7 @@ async function initWebRTC() {
     // Connect with specific roles
     await ir.connect({ roles: ROLES })
 
-    // Setup WebSocket for calibration events
-    await ir._connectWebSocket()
 
-    ir.on('calibrationProgress', (data) => {
-        updateCalibrationProgress(data)
-    })
-
-    ir.on('calibrationComplete', (data) => {
-        handleCalibrationComplete(data)
-    })
-
-    ir.on('calibrationError', (data) => {
-        handleCalibrationError(data)
-    })
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -171,122 +149,6 @@ async function goZero() {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Calibration
-// ─────────────────────────────────────────────────────────────────────────────
-
-async function startCalibration() {
-    elements.calStatus.textContent = 'Starting calibration...'
-    elements.calProgress.style.width = '0%'
-    elements.startCalBtn.disabled = true
-    elements.resetCalBtn.disabled = true
-
-    // Reset step indicators
-    for (let i = 1; i <= 4; i++) {
-        const step = document.getElementById(`step-${i}`)
-        if (step) {
-            step.classList.remove('active', 'complete')
-        }
-    }
-
-    try {
-        const res = await fetch(`${API_BASE}/api/calibration/start`, { method: 'POST' })
-        const data = await res.json()
-        if (!data.success) {
-            throw new Error(data.error || 'Failed to start calibration')
-        }
-        showToast('캘리브레이션 시작됨')
-    } catch (e) {
-        elements.calStatus.textContent = 'Error'
-        elements.startCalBtn.disabled = false
-        elements.resetCalBtn.disabled = false
-        showError(`캘리브레이션 시작 실패: ${e.message}`)
-    }
-}
-
-function updateCalibrationProgress(data) {
-    // Update status text
-    if (data.status) {
-        elements.calStatus.textContent = data.status
-    }
-
-    // Update progress bar
-    if (data.progress != null) {
-        elements.calProgress.style.width = `${data.progress}%`
-    }
-
-    // Update step indicators
-    if (data.current_step != null) {
-        for (let i = 1; i <= 4; i++) {
-            const step = document.getElementById(`step-${i}`)
-            if (step) {
-                step.classList.remove('active', 'complete')
-                if (i < data.current_step) {
-                    step.classList.add('complete')
-                } else if (i == data.current_step) {
-                    step.classList.add('active')
-                }
-            }
-        }
-    }
-}
-
-function handleCalibrationComplete(data) {
-    elements.calStatus.textContent = 'Calibration Complete!'
-    elements.calProgress.style.width = '100%'
-    elements.startCalBtn.disabled = false
-    elements.resetCalBtn.disabled = false
-
-    // Mark all steps complete
-    for (let i = 1; i <= 4; i++) {
-        const step = document.getElementById(`step-${i}`)
-        if (step) {
-            step.classList.remove('active')
-            step.classList.add('complete')
-        }
-    }
-
-    // Update quality metrics
-    if (data.quality) {
-        if (elements.qualityAccuracy) elements.qualityAccuracy.textContent = `${data.quality.accuracy || '--'}mm`
-        if (elements.qualityReproj) elements.qualityReproj.textContent = `${data.quality.reproj_error || '--'}px`
-        if (elements.qualityPoints) elements.qualityPoints.textContent = data.quality.valid_points || '--'
-    }
-
-    // Update JSON preview
-    if (elements.jsonPreview) {
-        elements.jsonPreview.textContent = JSON.stringify(data, null, 2)
-    }
-
-    showSuccess('캘리브레이션 완료!')
-    drawWorkspaceMap(data)
-}
-
-function handleCalibrationError(data) {
-    elements.calStatus.textContent = `Error: ${data.error || 'Unknown error'}`
-    elements.calProgress.style.width = '0%'
-    elements.startCalBtn.disabled = false
-    elements.resetCalBtn.disabled = false
-    showError(`캘리브레이션 실패: ${data.error}`)
-}
-
-async function resetCalibration() {
-    try {
-        await fetch(`${API_BASE}/api/calibration/reset`, { method: 'POST' })
-        elements.calStatus.textContent = 'Ready to calibrate'
-        elements.calProgress.style.width = '0%'
-
-        // Reset step indicators
-        for (let i = 1; i <= 4; i++) {
-            const step = document.getElementById(`step-${i}`)
-            if (step) step.classList.remove('active', 'complete')
-        }
-
-        showToast('캘리브레이션 리셋됨')
-    } catch (e) {
-        showError(`리셋 실패: ${e.message}`)
-    }
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Detection
@@ -686,18 +548,68 @@ function initEventListeners() {
     // Speed slider
     if (elements.motionSpeed) {
         elements.motionSpeed.addEventListener('input', () => {
-            elements.speedValue.textContent = `${elements.motionSpeed.value}초`
+            elements.speedValue.textContent = `${elements.motionSpeed.value}s`
         })
     }
+}
 
-    // Calibration
-    if (elements.startCalBtn) elements.startCalBtn.addEventListener('click', startCalibration)
-    if (elements.resetCalBtn) elements.resetCalBtn.addEventListener('click', resetCalibration)
+// ─────────────────────────────────────────────────────────────────────────────
+// Tab System
+// ─────────────────────────────────────────────────────────────────────────────
 
-    // Detection
-    if (elements.captureBtn) elements.captureBtn.addEventListener('click', captureAllCameras)
-    if (elements.detectBaseBtn) elements.detectBaseBtn.addEventListener('click', detectRobotBase)
-    if (elements.detectGripperBtn) elements.detectGripperBtn.addEventListener('click', detectGripper)
+function initTabs() {
+    elements.tabButtons.forEach(btn => {
+        btn.addEventListener('click', () => {
+            const tabId = btn.dataset.tab
+
+            // Update button states
+            elements.tabButtons.forEach(b => b.classList.remove('active'))
+            btn.classList.add('active')
+
+            // Update panel visibility
+            elements.tabPanels.forEach(panel => {
+                panel.classList.remove('active')
+                if (panel.id == `tab-${tabId}`) {
+                    panel.classList.add('active')
+                }
+            })
+        })
+    })
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Canvas Resize
+// ─────────────────────────────────────────────────────────────────────────────
+
+function initCanvasResize() {
+    const container = document.getElementById('topview-container')
+    const video = document.getElementById('camera-0')
+    const canvas = document.getElementById('overlay-canvas')
+
+    if (!container || !video || !canvas) return
+
+    function resizeCanvas() {
+        // Match canvas size to video display size
+        const rect = video.getBoundingClientRect()
+        canvas.width = rect.width
+        canvas.height = rect.height
+        canvas.style.width = rect.width + 'px'
+        canvas.style.height = rect.height + 'px'
+
+        // Redraw overlay with new size
+        if (typeof drawOverlay == 'function') {
+            drawOverlay()
+        }
+    }
+
+    // Resize on video metadata loaded
+    video.addEventListener('loadedmetadata', resizeCanvas)
+
+    // Resize on window resize
+    window.addEventListener('resize', resizeCanvas)
+
+    // Initial resize attempt
+    setTimeout(resizeCanvas, 500)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -708,6 +620,8 @@ async function init() {
     console.log('Calibration page initializing...')
     initEventListeners()
     initOverlayTools()
+    initTabs()
+    initCanvasResize()
 
     try {
         await initWebRTC()
