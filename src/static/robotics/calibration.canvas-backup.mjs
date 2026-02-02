@@ -290,12 +290,12 @@ async function detectGripper() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SVG Overlay - State & DOM Manipulation
+// Overlay Canvas - State & Rendering
 // ─────────────────────────────────────────────────────────────────────────────
 
 const overlayState = {
     tool: 'vertex',  // 'vertex', 'left-base', 'right-base', 'left-gripper', 'right-gripper'
-    vertices: [],    // [{x, y}, ...] - viewBox (original video) coordinates
+    vertices: [],    // [{x, y}, ...]
     leftBase: null,  // {x, y}
     rightBase: null, // {x, y}
     leftGripper: null,   // {x, y}
@@ -305,279 +305,267 @@ const overlayState = {
     dragStart: null,  // {x, y} - for click vs drag detection
 }
 
-const SVG_NS = 'http://www.w3.org/2000/svg'
-const VERTEX_RADIUS = 8
-const VERTEX_SELECTED_RADIUS = 12
-const MARKER_RADIUS = 12
-const DELETE_BTN_OFFSET = { x: 25, y: -25 }
-const DELETE_BTN_RADIUS = 12
+const overlayCanvas = document.getElementById('overlay-canvas')
+const overlayCtx = overlayCanvas ? overlayCanvas.getContext('2d') : null
 
-// Get SVG coordinates from mouse event (auto-transforms via getScreenCTM)
-function getSVGCoordinates(event) {
-    const svg = document.getElementById('overlay-svg')
-    if (!svg) return null
+const HIT_RADIUS = 15
+const DELETE_BTN_OFFSET = { x: 20, y: -20 }
+const DELETE_BTN_SIZE = 18
 
-    const pt = svg.createSVGPoint()
-    pt.x = event.clientX
-    pt.y = event.clientY
-
-    const ctm = svg.getScreenCTM()
-    if (!ctm) return null
-
-    return pt.matrixTransform(ctm.inverse())
-}
-
-// Update SVG viewBox to match video intrinsic size
-function updateViewBox() {
-    const video = document.getElementById('camera-0')
-    const svg = document.getElementById('overlay-svg')
-    if (!video || !svg) return
-
-    if (video.videoWidth && video.videoHeight) {
-        svg.setAttribute('viewBox', `0 0 ${video.videoWidth} ${video.videoHeight}`)
+function findNearestVertex(x, y) {
+    for (let i = 0; i < overlayState.vertices.length; i++) {
+        const v = overlayState.vertices[i]
+        const dist = Math.sqrt((v.x - x) ** 2 + (v.y - y) ** 2)
+        if (dist < HIT_RADIUS) return i
     }
+    return null
 }
 
-// Update polygon points attribute
-function updatePolygonPoints() {
-    const polygon = document.getElementById('workspace-polygon')
-    if (!polygon) return
-
-    const points = overlayState.vertices.map(v => `${v.x},${v.y}`).join(' ')
-    polygon.setAttribute('points', points)
+function isClickOnDeleteBtn(x, y) {
+    if (overlayState.selectedVertex == null) return false
+    const v = overlayState.vertices[overlayState.selectedVertex]
+    if (!v) return false
+    const btnX = v.x + DELETE_BTN_OFFSET.x
+    const btnY = v.y + DELETE_BTN_OFFSET.y
+    return Math.abs(x - btnX) < DELETE_BTN_SIZE && Math.abs(y - btnY) < DELETE_BTN_SIZE
 }
 
-// Create a vertex circle element
-function createVertexCircle(x, y, index) {
-    const circle = document.createElementNS(SVG_NS, 'circle')
-    circle.setAttribute('cx', x)
-    circle.setAttribute('cy', y)
-    circle.setAttribute('r', VERTEX_RADIUS)
-    circle.setAttribute('class', 'vertex')
-    circle.setAttribute('data-index', index)
+function drawOverlay() {
+    if (!overlayCtx) return
 
-    // Create label
-    const label = document.createElementNS(SVG_NS, 'text')
-    label.setAttribute('x', x)
-    label.setAttribute('y', y)
-    label.setAttribute('class', 'vertex-label')
-    label.textContent = index + 1
+    overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height)
 
-    return { circle, label }
-}
-
-// Create a delete button for selected vertex
-function createDeleteButton(x, y) {
-    const g = document.createElementNS(SVG_NS, 'g')
-    g.setAttribute('class', 'delete-group')
-
-    const btnX = x + DELETE_BTN_OFFSET.x
-    const btnY = y + DELETE_BTN_OFFSET.y
-
-    const circle = document.createElementNS(SVG_NS, 'circle')
-    circle.setAttribute('cx', btnX)
-    circle.setAttribute('cy', btnY)
-    circle.setAttribute('r', DELETE_BTN_RADIUS)
-    circle.setAttribute('class', 'delete-btn')
-
-    const text = document.createElementNS(SVG_NS, 'text')
-    text.setAttribute('x', btnX)
-    text.setAttribute('y', btnY)
-    text.setAttribute('class', 'marker-label')
-    text.textContent = '×'
-
-    g.appendChild(circle)
-    g.appendChild(text)
-
-    // Delete click handler
-    circle.addEventListener('click', (e) => {
-        e.stopPropagation()
-        if (overlayState.selectedVertex != null) {
-            overlayState.vertices.splice(overlayState.selectedVertex, 1)
-            overlayState.selectedVertex = null
-            renderOverlay()
+    // Draw polygon
+    if (overlayState.vertices.length > 0) {
+        overlayCtx.beginPath()
+        overlayCtx.moveTo(overlayState.vertices[0].x, overlayState.vertices[0].y)
+        for (let i = 1; i < overlayState.vertices.length; i++) {
+            overlayCtx.lineTo(overlayState.vertices[i].x, overlayState.vertices[i].y)
         }
-    })
+        if (overlayState.vertices.length > 2) {
+            overlayCtx.closePath()
+            overlayCtx.fillStyle = 'rgba(100, 200, 255, 0.15)'
+            overlayCtx.fill()
+        }
+        overlayCtx.strokeStyle = '#64c8ff'
+        overlayCtx.lineWidth = 2
+        overlayCtx.stroke()
 
-    return g
-}
-
-// Create a marker element (base or gripper)
-function createMarkerElement(type, pos, color, labelText) {
-    const g = document.createElementNS(SVG_NS, 'g')
-    g.setAttribute('class', 'marker')
-    g.setAttribute('data-type', type)
-
-    const circle = document.createElementNS(SVG_NS, 'circle')
-    circle.setAttribute('cx', pos.x)
-    circle.setAttribute('cy', pos.y)
-    circle.setAttribute('r', MARKER_RADIUS)
-    circle.setAttribute('fill', color)
-    circle.setAttribute('stroke', '#fff')
-    circle.setAttribute('stroke-width', '2')
-
-    const label = document.createElementNS(SVG_NS, 'text')
-    label.setAttribute('x', pos.x)
-    label.setAttribute('y', pos.y)
-    label.setAttribute('class', 'marker-label')
-    label.textContent = labelText
-
-    g.appendChild(circle)
-    g.appendChild(label)
-
-    return g
-}
-
-// Render entire overlay (vertices, polygon, markers)
-function renderOverlay() {
-    const vertexGroup = document.getElementById('vertex-group')
-    const markerGroup = document.getElementById('marker-group')
-    if (!vertexGroup || !markerGroup) return
-
-    // Clear existing elements
-    vertexGroup.innerHTML = ''
-    markerGroup.innerHTML = ''
-
-    // Update polygon
-    updatePolygonPoints()
-
-    // Render vertices
-    overlayState.vertices.forEach((v, i) => {
-        const { circle, label } = createVertexCircle(v.x, v.y, i)
-
-        if (overlayState.selectedVertex == i) {
-            circle.classList.add('selected')
-            circle.setAttribute('r', VERTEX_SELECTED_RADIUS)
-
-            // Add dragging effect when currently being dragged
-            if (overlayState.isDragging) {
-                circle.classList.add('dragging')
+        // Draw vertices
+        overlayState.vertices.forEach((v, i) => {
+            const isSelected = overlayState.selectedVertex == i
+            overlayCtx.beginPath()
+            overlayCtx.arc(v.x, v.y, isSelected ? 12 : 8, 0, Math.PI * 2)
+            overlayCtx.fillStyle = isSelected ? '#ffd43b' : '#64c8ff'
+            overlayCtx.fill()
+            if (isSelected) {
+                overlayCtx.strokeStyle = '#fff'
+                overlayCtx.lineWidth = 2
+                overlayCtx.stroke()
             }
-        }
+            overlayCtx.fillStyle = '#000'
+            overlayCtx.font = '10px Inter, sans-serif'
+            overlayCtx.textAlign = 'center'
+            overlayCtx.textBaseline = 'middle'
+            overlayCtx.fillText(i + 1, v.x, v.y)
 
-        // Vertex click handler
-        circle.addEventListener('mousedown', (e) => {
-            e.stopPropagation()
-            const coords = getSVGCoordinates(e)
-            if (!coords) return
-
-            overlayState.dragStart = { x: coords.x, y: coords.y }
-            overlayState.selectedVertex = i
-            overlayState.isDragging = true
-            renderOverlay()
+            // Draw delete button for selected vertex
+            if (isSelected) {
+                const btnX = v.x + DELETE_BTN_OFFSET.x
+                const btnY = v.y + DELETE_BTN_OFFSET.y
+                overlayCtx.beginPath()
+                overlayCtx.arc(btnX, btnY, DELETE_BTN_SIZE / 2, 0, Math.PI * 2)
+                overlayCtx.fillStyle = '#f03e3e'
+                overlayCtx.fill()
+                overlayCtx.fillStyle = '#fff'
+                overlayCtx.font = 'bold 12px Inter, sans-serif'
+                overlayCtx.fillText('×', btnX, btnY)
+            }
         })
-
-        vertexGroup.appendChild(circle)
-        vertexGroup.appendChild(label)
-    })
-
-    // Add delete button for selected vertex
-    if (overlayState.selectedVertex != null && overlayState.vertices[overlayState.selectedVertex]) {
-        const v = overlayState.vertices[overlayState.selectedVertex]
-        const deleteBtn = createDeleteButton(v.x, v.y)
-        vertexGroup.appendChild(deleteBtn)
     }
 
-    // Render markers
+    // Draw bases
     if (overlayState.leftBase) {
-        markerGroup.appendChild(createMarkerElement('left-base', overlayState.leftBase, '#ff6b6b', 'L'))
+        drawMarker(overlayState.leftBase, '#ff6b6b', '◆', 'L')
     }
     if (overlayState.rightBase) {
-        markerGroup.appendChild(createMarkerElement('right-base', overlayState.rightBase, '#4dabf7', 'R'))
+        drawMarker(overlayState.rightBase, '#4dabf7', '◆', 'R')
     }
+
+    // Draw grippers
     if (overlayState.leftGripper) {
-        markerGroup.appendChild(createMarkerElement('left-gripper', overlayState.leftGripper, '#ff6b6b', '★'))
+        drawMarker(overlayState.leftGripper, '#ff6b6b', '★', 'L')
     }
     if (overlayState.rightGripper) {
-        markerGroup.appendChild(createMarkerElement('right-gripper', overlayState.rightGripper, '#4dabf7', '★'))
+        drawMarker(overlayState.rightGripper, '#4dabf7', '★', 'R')
     }
 }
 
-// Handle SVG background click (add vertex or marker)
-function handleSVGClick(e) {
-    // Ignore if clicking on existing element
-    if (e.target.closest('.vertex') || e.target.closest('.marker') || e.target.closest('.delete-btn')) {
+function drawMarker(pos, color, symbol, label) {
+    overlayCtx.beginPath()
+    overlayCtx.arc(pos.x, pos.y, 12, 0, Math.PI * 2)
+    overlayCtx.fillStyle = color
+    overlayCtx.fill()
+    overlayCtx.strokeStyle = '#fff'
+    overlayCtx.lineWidth = 2
+    overlayCtx.stroke()
+
+    overlayCtx.fillStyle = '#fff'
+    overlayCtx.font = 'bold 12px Inter, sans-serif'
+    overlayCtx.textAlign = 'center'
+    overlayCtx.textBaseline = 'middle'
+    overlayCtx.fillText(label, pos.x, pos.y)
+}
+
+function handleOverlayClick(e) {
+    const rect = overlayCanvas.getBoundingClientRect()
+    const x = e.clientX - rect.left
+    const y = e.clientY - rect.top
+
+    // Check delete button click first
+    if (isClickOnDeleteBtn(x, y)) {
+        overlayState.vertices.splice(overlayState.selectedVertex, 1)
+        overlayState.selectedVertex = null
+        drawOverlay()
         return
     }
 
-    const coords = getSVGCoordinates(e)
-    if (!coords) return
+    // Check hit on existing vertex
+    const hitIndex = findNearestVertex(x, y)
 
     switch (overlayState.tool) {
         case 'vertex':
-            overlayState.vertices.push({ x: coords.x, y: coords.y })
-            overlayState.selectedVertex = null
+            if (hitIndex != null) {
+                // Select or deselect vertex
+                overlayState.selectedVertex = overlayState.selectedVertex == hitIndex ? null : hitIndex
+            } else {
+                // Add new vertex
+                overlayState.vertices.push({ x, y })
+                overlayState.selectedVertex = null
+            }
             break
         case 'left-base':
-            overlayState.leftBase = { x: coords.x, y: coords.y }
+            overlayState.leftBase = { x, y }
             break
         case 'right-base':
-            overlayState.rightBase = { x: coords.x, y: coords.y }
+            overlayState.rightBase = { x, y }
             break
         case 'left-gripper':
-            overlayState.leftGripper = { x: coords.x, y: coords.y }
+            overlayState.leftGripper = { x, y }
             break
         case 'right-gripper':
-            overlayState.rightGripper = { x: coords.x, y: coords.y }
+            overlayState.rightGripper = { x, y }
             break
     }
 
-    renderOverlay()
+    drawOverlay()
 }
 
-// Handle mouse move for dragging
-function handleSVGMouseMove(e) {
+function handleOverlayMouseDown(e) {
+    const rect = overlayCanvas.getBoundingClientRect()
+    const x = e.clientX - rect.left
+    const y = e.clientY - rect.top
+
+    overlayState.dragStart = { x, y }
+
+    if (overlayState.tool == 'vertex') {
+        const hitIndex = findNearestVertex(x, y)
+        if (hitIndex != null) {
+            overlayState.selectedVertex = hitIndex
+            overlayState.isDragging = true
+            drawOverlay()
+        }
+    }
+}
+
+function handleOverlayMouseMove(e) {
     if (!overlayState.isDragging || overlayState.selectedVertex == null) return
 
-    const coords = getSVGCoordinates(e)
-    if (!coords) return
+    const rect = overlayCanvas.getBoundingClientRect()
+    const x = e.clientX - rect.left
+    const y = e.clientY - rect.top
 
-    overlayState.vertices[overlayState.selectedVertex] = { x: coords.x, y: coords.y }
-    renderOverlay()
+    overlayState.vertices[overlayState.selectedVertex] = { x, y }
+    drawOverlay()
 }
 
-// Handle mouse up (end drag or click)
-function handleSVGMouseUp(e) {
-    const coords = getSVGCoordinates(e)
+function handleOverlayMouseUp(e) {
+    const rect = overlayCanvas.getBoundingClientRect()
+    const x = e.clientX - rect.left
+    const y = e.clientY - rect.top
+
     const start = overlayState.dragStart
     const wasDragging = overlayState.isDragging
-
     overlayState.isDragging = false
     overlayState.dragStart = null
 
-    if (!coords || !start) return
+    // Calculate distance to determine click vs drag
+    const distance = start ? Math.sqrt((x - start.x) ** 2 + (y - start.y) ** 2) : 0
 
-    // Calculate drag distance
-    const distance = Math.sqrt((coords.x - start.x) ** 2 + (coords.y - start.y) ** 2)
-
-    // If dragged more than 5 units, it was a drag - don't process as click
+    // If moved more than 5px, it was a drag - don't process as click
     if (distance > 5) return
 
-    // If was dragging vertex, don't add new vertex
-    if (wasDragging) return
+    // If was dragging a vertex, don't process as click (vertex already moved)
+    if (wasDragging && overlayState.selectedVertex != null) return
 
-    // Handle click on background (add new element)
-    handleSVGClick(e)
+    // Process as click
+    // Check delete button first
+    if (isClickOnDeleteBtn(x, y)) {
+        overlayState.vertices.splice(overlayState.selectedVertex, 1)
+        overlayState.selectedVertex = null
+        drawOverlay()
+        return
+    }
+
+    const hitIndex = findNearestVertex(x, y)
+
+    switch (overlayState.tool) {
+        case 'vertex':
+            if (hitIndex != null) {
+                overlayState.selectedVertex = overlayState.selectedVertex == hitIndex ? null : hitIndex
+            } else {
+                overlayState.vertices.push({ x, y })
+                overlayState.selectedVertex = null
+            }
+            break
+        case 'left-base':
+            overlayState.leftBase = { x, y }
+            break
+        case 'right-base':
+            overlayState.rightBase = { x, y }
+            break
+        case 'left-gripper':
+            overlayState.leftGripper = { x, y }
+            break
+        case 'right-gripper':
+            overlayState.rightGripper = { x, y }
+            break
+    }
+
+    drawOverlay()
+}
+
+function handleOverlayMouseLeave() {
+    // Only reset state, don't process as click
+    overlayState.isDragging = false
+    overlayState.dragStart = null
 }
 
 function initOverlayTools() {
     const toolbar = document.getElementById('overlay-toolbar')
-    const svg = document.getElementById('overlay-svg')
-    const video = document.getElementById('camera-0')
-
     if (!toolbar) return
 
-    // Tool selection
     toolbar.querySelectorAll('.tool-btn').forEach(btn => {
         btn.addEventListener('click', () => {
             const tool = btn.dataset.tool
             if (!tool) return
 
+            // Clear all active
             toolbar.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'))
             btn.classList.add('active')
             overlayState.tool = tool
             overlayState.selectedVertex = null
-            renderOverlay()
+            drawOverlay()
         })
     })
 
@@ -591,50 +579,17 @@ function initOverlayTools() {
             overlayState.leftGripper = null
             overlayState.rightGripper = null
             overlayState.selectedVertex = null
-            renderOverlay()
+            drawOverlay()
             showSuccess('오버레이 초기화됨')
         })
     }
 
-    // SVG events
-    if (svg) {
-        svg.addEventListener('mousedown', (e) => {
-            const coords = getSVGCoordinates(e)
-            if (coords) {
-                overlayState.dragStart = { x: coords.x, y: coords.y }
-            }
-        })
-        svg.addEventListener('mousemove', handleSVGMouseMove)
-        svg.addEventListener('mouseup', handleSVGMouseUp)
-        svg.addEventListener('mouseleave', () => {
-            overlayState.isDragging = false
-            overlayState.dragStart = null
-        })
-
-        // Click on polygon to deselect
-        const polygon = document.getElementById('workspace-polygon')
-        if (polygon) {
-            polygon.addEventListener('click', (e) => {
-                // Only deselect, don't add vertex when clicking polygon
-                if (overlayState.selectedVertex != null) {
-                    overlayState.selectedVertex = null
-                    renderOverlay()
-                    e.stopPropagation()
-                }
-            })
-        }
-    }
-
-    // Update viewBox when video loads
-    if (video) {
-        video.addEventListener('loadedmetadata', () => {
-            updateViewBox()
-            renderOverlay()
-        })
-        // Try immediately in case already loaded
-        if (video.videoWidth && video.videoHeight) {
-            updateViewBox()
-        }
+    // Canvas events
+    if (overlayCanvas) {
+        overlayCanvas.addEventListener('mousedown', handleOverlayMouseDown)
+        overlayCanvas.addEventListener('mousemove', handleOverlayMouseMove)
+        overlayCanvas.addEventListener('mouseup', handleOverlayMouseUp)
+        overlayCanvas.addEventListener('mouseleave', handleOverlayMouseLeave)
     }
 }
 
@@ -705,7 +660,40 @@ function initTabs() {
     })
 }
 
-// NOTE: Canvas resize logic removed - SVG viewBox handles automatic scaling
+// ─────────────────────────────────────────────────────────────────────────────
+// Canvas Resize
+// ─────────────────────────────────────────────────────────────────────────────
+
+function initCanvasResize() {
+    const container = document.getElementById('topview-container')
+    const video = document.getElementById('camera-0')
+    const canvas = document.getElementById('overlay-canvas')
+
+    if (!container || !video || !canvas) return
+
+    function resizeCanvas() {
+        // Match canvas size to video display size
+        const rect = video.getBoundingClientRect()
+        canvas.width = rect.width
+        canvas.height = rect.height
+        canvas.style.width = rect.width + 'px'
+        canvas.style.height = rect.height + 'px'
+
+        // Redraw overlay with new size
+        if (typeof drawOverlay == 'function') {
+            drawOverlay()
+        }
+    }
+
+    // Resize on video metadata loaded
+    video.addEventListener('loadedmetadata', resizeCanvas)
+
+    // Resize on window resize
+    window.addEventListener('resize', resizeCanvas)
+
+    // Initial resize attempt
+    setTimeout(resizeCanvas, 500)
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Servo Config API
@@ -751,6 +739,7 @@ async function init() {
     initEventListeners()
     initOverlayTools()
     initTabs()
+    initCanvasResize()
 
     // Load servo config for JSON preview
     await loadServoConfig()

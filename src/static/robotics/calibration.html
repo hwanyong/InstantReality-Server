@@ -42,7 +42,7 @@
             background: #000;
         }
 
-        #topview-container canvas {
+        #overlay-svg {
             position: absolute;
             top: 0;
             left: 0;
@@ -50,6 +50,71 @@
             height: 100%;
             pointer-events: auto;
             border-radius: 8px;
+        }
+
+        #overlay-svg polygon {
+            pointer-events: auto;
+            fill: rgba(100, 200, 255, 0.15);
+            stroke: #64c8ff;
+            stroke-width: 2;
+        }
+
+        #overlay-svg circle.vertex {
+            pointer-events: auto;
+            cursor: pointer;
+            fill: #64c8ff;
+            transition: all 0.15s ease;
+        }
+
+        #overlay-svg circle.vertex:hover {
+            filter: drop-shadow(0 0 6px rgba(100, 200, 255, 0.8));
+        }
+
+        #overlay-svg circle.vertex.selected {
+            fill: #ffd43b;
+            stroke: #fff;
+            stroke-width: 2;
+            r: 12;
+        }
+
+        #overlay-svg circle.vertex.dragging {
+            opacity: 0.5;
+            r: 5;
+            cursor: grabbing;
+        }
+
+        #overlay-svg .vertex-label {
+            font-size: 10px;
+            font-family: Inter, sans-serif;
+            fill: #000;
+            text-anchor: middle;
+            dominant-baseline: central;
+            pointer-events: none;
+        }
+
+        #overlay-svg .marker {
+            pointer-events: auto;
+            cursor: pointer;
+        }
+
+        #overlay-svg .marker-label {
+            font-size: 12px;
+            font-weight: bold;
+            font-family: Inter, sans-serif;
+            fill: #fff;
+            text-anchor: middle;
+            dominant-baseline: central;
+            pointer-events: none;
+        }
+
+        #overlay-svg .delete-btn {
+            pointer-events: auto;
+            cursor: pointer;
+            fill: #f03e3e;
+        }
+
+        #overlay-svg .delete-btn:hover {
+            fill: #ff6b6b;
         }
 
         #topview-label {
@@ -346,7 +411,11 @@
             <section class="topview-area">
                 <div id="topview-container">
                     <video id="camera-0" autoplay playsinline muted></video>
-                    <canvas id="overlay-canvas"></canvas>
+                    <svg id="overlay-svg" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet">
+                        <polygon id="workspace-polygon" points="" />
+                        <g id="vertex-group"></g>
+                        <g id="marker-group"></g>
+                    </svg>
                     <div id="topview-label">🎯 TopView</div>
                 </div>
             </section>
