@@ -468,6 +468,7 @@ async def handle_offer(request):
             active_tracks.pop(pc_id, None)
     
     # Determine which cameras to stream
+    mapped_roles = []
     if requested_roles:
         # Role-based selection for calibration
         camera_indices = []
@@ -475,6 +476,7 @@ async def handle_offer(request):
             idx = get_index_by_role(role)
             if idx is not None:
                 camera_indices.append(idx)
+                mapped_roles.append(role)  # Track actually mapped roles
                 logger.info(f"Role '{role}' -> camera {idx}")
             else:
                 logger.warning(f"Role '{role}' not found")
@@ -529,7 +531,8 @@ async def handle_offer(request):
     return web.json_response({
         "sdp": pc.localDescription.sdp,
         "type": pc.localDescription.type,
-        "client_id": pc_id
+        "client_id": pc_id,
+        "mapped_roles": mapped_roles  # Return actual role mapping
     })
 
 
@@ -576,10 +579,13 @@ async def handle_pause_camera(request):
 
 
 async def handle_pause_camera_client(request):
-    """POST /pause_camera_client - Per-client pause (bandwidth saving)"""
+    """POST /pause_camera_client - Per-client pause (bandwidth saving)
+    
+    Supports both legacy camera_index and role-based addressing.
+    Role-based addressing is preferred for stable camera identification.
+    """
     data = await request.json()
     client_id = data.get("client_id")
-    camera_index = int(data.get("camera_index", 0))
     paused = data.get("paused", True)
     
     if not client_id:
@@ -587,6 +593,16 @@ async def handle_pause_camera_client(request):
     
     if client_id not in active_tracks:
         return web.json_response({"error": "Client not found"}, status=404)
+    
+    # Role-based addressing (preferred)
+    role = data.get("role")
+    if role:
+        camera_index = get_index_by_role(role)
+        if camera_index is None:
+            return web.json_response({"error": f"Role {role} not connected"}, status=404)
+    else:
+        # Legacy: direct camera_index
+        camera_index = int(data.get("camera_index", 0))
     
     if camera_index not in active_tracks[client_id]:
         return web.json_response({"error": f"Camera {camera_index} not found for client"}, status=404)
@@ -599,19 +615,20 @@ async def handle_pause_camera_client(request):
         black_track = BlackVideoTrack()
         sender.replaceTrack(black_track)
         track_info["paused"] = True
-        logger.info(f"Client {client_id}: camera {camera_index} paused (per-client)")
+        logger.info(f"Client {client_id}: camera {camera_index} ({role or 'direct'}) paused (per-client)")
     else:
         # Restore original proxy track
         new_proxy = relay.subscribe(source_tracks[camera_index], buffered=False)
         sender.replaceTrack(new_proxy)
         track_info["track"] = new_proxy
         track_info["paused"] = False
-        logger.info(f"Client {client_id}: camera {camera_index} resumed (per-client)")
+        logger.info(f"Client {client_id}: camera {camera_index} ({role or 'direct'}) resumed (per-client)")
     
     return web.json_response({
         "success": True,
         "client_id": client_id,
         "camera_index": camera_index,
+        "role": role,
         "paused": paused
     })
 

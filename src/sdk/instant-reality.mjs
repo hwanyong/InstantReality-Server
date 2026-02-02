@@ -89,19 +89,6 @@ export class InstantReality {
 
         const enabledCameras = options.cameras
 
-        pc.ontrack = (evt) => {
-            if (evt.track.kind != 'video') return
-            const cameraIndex = this.trackCounter++
-            this.tracks.set(cameraIndex, evt.track)
-
-            // Set initial enabled state
-            if (enabledCameras != null) {
-                evt.track.enabled = enabledCameras.includes(cameraIndex)
-            }
-
-            this.emit('track', evt.track, cameraIndex)
-        }
-
         pc.onconnectionstatechange = () => {
             if (pc.connectionState == 'connected') {
                 this.emit('connected')
@@ -139,6 +126,27 @@ export class InstantReality {
 
         const answer = await response.json()
         this.clientId = answer.client_id
+
+        // Store mapped roles from server
+        this.mappedRoles = answer.mapped_roles || options.roles || []
+
+        // Define ontrack handler AFTER we have mappedRoles
+        pc.ontrack = (evt) => {
+            if (evt.track.kind != 'video') return
+            const cameraIndex = this.trackCounter++
+            this.tracks.set(cameraIndex, evt.track)
+
+            // Set initial enabled state
+            if (enabledCameras != null) {
+                evt.track.enabled = enabledCameras.includes(cameraIndex)
+            }
+
+            // Get role name for this track if available
+            const roleName = this.mappedRoles[cameraIndex]
+
+            this.emit('track', evt.track, cameraIndex, roleName)
+        }
+
         await pc.setRemoteDescription(answer)
 
         // Connect WebSocket for real-time camera updates

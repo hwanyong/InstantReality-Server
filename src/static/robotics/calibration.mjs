@@ -50,12 +50,22 @@ const elements = {
 async function initWebRTC() {
     ir = new InstantReality({ serverUrl: API_BASE })
 
-    ir.on('track', (track, index) => {
-        console.log(`Received track ${index} for role ${ROLES[index]}`)
-        const video = elements.cameras[index]
-        if (video) {
-            video.srcObject = new MediaStream([track])
-            video.play().catch(e => console.warn('Autoplay prevented:', e))
+    ir.on('track', (track, index, roleName) => {
+        // Use dynamically mapped role if available, otherwise fallback to static index
+        const role = roleName || ROLES[index]
+        console.log(`Received track ${index}, mapped to role: ${role}`)
+
+        // Find correct video element by role
+        const roleIndex = ROLES.indexOf(role)
+
+        if (roleIndex !== -1) {
+            const video = elements.cameras[roleIndex]
+            if (video) {
+                video.srcObject = new MediaStream([track])
+                video.play().catch(e => console.warn('Autoplay prevented:', e))
+            }
+        } else {
+            console.warn(`Unknown role: ${role}`)
         }
     })
 
@@ -77,18 +87,18 @@ async function initWebRTC() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Camera Pause (Per-Client)
+// Camera Pause (Per-Client) - Role Based
 // ─────────────────────────────────────────────────────────────────────────────
 
-const pausedCameras = new Set()
+const pausedRoles = new Set()
 
-async function toggleCameraPause(cameraIndex) {
+async function toggleCameraPause(role) {
     if (!ir || !ir.clientId) {
         showError('WebRTC 연결 필요')
         return
     }
 
-    const paused = !pausedCameras.has(cameraIndex)
+    const paused = !pausedRoles.has(role)
 
     try {
         const res = await fetch(`${API_BASE}/pause_camera_client`, {
@@ -96,7 +106,7 @@ async function toggleCameraPause(cameraIndex) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 client_id: ir.clientId,
-                camera_index: cameraIndex,
+                role: role,
                 paused: paused
             })
         })
@@ -106,25 +116,25 @@ async function toggleCameraPause(cameraIndex) {
         }
 
         if (paused) {
-            pausedCameras.add(cameraIndex)
-            showToast(`카메라 ${cameraIndex} 일시정지됨`)
+            pausedRoles.add(role)
+            showToast(`${role} 일시정지됨`)
         } else {
-            pausedCameras.delete(cameraIndex)
-            showToast(`카메라 ${cameraIndex} 재개됨`)
+            pausedRoles.delete(role)
+            showToast(`${role} 재개됨`)
         }
 
-        updatePauseButtonState(cameraIndex)
+        updatePauseButtonState(role)
     } catch (e) {
         console.error('Failed to toggle pause:', e)
         showError(`일시정지 실패: ${e.message}`)
     }
 }
 
-function updatePauseButtonState(cameraIndex) {
-    const btn = document.querySelector(`.pause-btn[data-camera="${cameraIndex}"]`)
+function updatePauseButtonState(role) {
+    const btn = document.querySelector(`.pause-btn[data-role="${role}"]`)
     if (!btn) return
 
-    if (pausedCameras.has(cameraIndex)) {
+    if (pausedRoles.has(role)) {
         btn.classList.add('paused')
         btn.textContent = '▶'
         btn.title = '재생'
@@ -139,8 +149,10 @@ function initPauseButtons() {
     document.querySelectorAll('.pause-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
             e.stopPropagation()
-            const cameraIndex = parseInt(btn.dataset.camera)
-            toggleCameraPause(cameraIndex)
+            const role = btn.dataset.role
+            if (role) {
+                toggleCameraPause(role)
+            }
         })
     })
 }
