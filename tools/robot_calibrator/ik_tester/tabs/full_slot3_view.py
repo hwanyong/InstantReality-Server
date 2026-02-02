@@ -245,18 +245,17 @@ class FullSlot3Tab(BaseTabController):
         
         if p1:
             self.top_widget.cfg.update(p1)
-            # Config 기반 direction 계산 (arm 이름 의존 제거)
+            # 시각화용 direction (zero_offset 기반)
             min_pos = p1.get('min_pos', 'right')
             zero_offset = p1.get('zero_offset', 0)
             act_range = p1.get('actuation_range', 180)
-            base_sign = 1 if min_pos == 'right' else -1
-            flip = -1 if zero_offset >= 90 else 1
-            direction = base_sign * flip
-            self.top_widget.cfg['direction'] = direction
+            # direction은 시각화 전용, 각도 계산에는 사용 안함
+            self.top_widget.cfg['direction'] = 1 if zero_offset < 90 else -1
             
-            # Math 범위 통일 (로컬 좌표계: 0 ~ actuation_range)
-            self.top_widget.cfg['math_min'] = 0
-            self.top_widget.cfg['math_max'] = act_range
+            # Math 범위: theta1 범위 = [0 - zero_offset, act_range - zero_offset]
+            # Right arm (zero=0): 0~180, Left arm (zero=180): -180~0
+            self.top_widget.cfg['math_min'] = -zero_offset
+            self.top_widget.cfg['math_max'] = act_range - zero_offset
             self.p1 = p1
         
         # Slot 2/3/4 lengths -> Side View Widget
@@ -295,12 +294,8 @@ class FullSlot3Tab(BaseTabController):
         y = self.y_var.get()
         z = self.z_var.get()
         
-        # θ1 Calculation (Config 기반: direction으로 자동 계산)
-        direction = self.top_widget.cfg.get('direction', 1)
-        if direction == 1:
-            theta1 = math.degrees(math.atan2(-x, y)) if (x != 0 or y != 0) else 0
-        else:
-            theta1 = math.degrees(math.atan2(x, -y)) if (x != 0 or y != 0) else 0
+        # θ1 Calculation (통일된 좌표계: Y=forward, CCW positive)
+        theta1 = math.degrees(math.atan2(-x, y)) if (x != 0 or y != 0) else 0
         R = math.sqrt(x**2 + y**2)
         
         # --- Load link lengths from config ---
@@ -332,11 +327,8 @@ class FullSlot3Tab(BaseTabController):
             zero_offset = self.p1.get('zero_offset', 0)
             act_range = self.p1.get('actuation_range', 180)
             
-            # direction 기반 physical 각도 계산
-            if direction == 1:
-                phy_angle_s1 = zero_offset + theta1
-            else:
-                phy_angle_s1 = zero_offset - theta1
+            # 통일된 physical 각도 계산: phy = zero_offset + theta1
+            phy_angle_s1 = zero_offset + theta1
             phy_angle_s1 = max(0, min(act_range, phy_angle_s1))
             
             pulse_val_s1 = mapper.physical_to_pulse(phy_angle_s1, self.p1['motor_config'])
@@ -579,11 +571,8 @@ class FullSlot3Tab(BaseTabController):
         
         x = self.x_var.get()
         y = self.y_var.get()
-        direction = self.top_widget.cfg.get('direction', 1)
-        if direction == 1:
-            theta1 = math.degrees(math.atan2(-x, y)) if (x != 0 or y != 0) else 0
-        else:
-            theta1 = math.degrees(math.atan2(x, -y)) if (x != 0 or y != 0) else 0
+        # 통일된 좌표계: Y=forward, CCW positive
+        theta1 = math.degrees(math.atan2(-x, y)) if (x != 0 or y != 0) else 0
         
         # Use IK-calculated angles (Slot 2-4)
         theta2 = getattr(self, '_ik_theta2', 0.0)
@@ -596,12 +585,9 @@ class FullSlot3Tab(BaseTabController):
         
         mapper = self.context.mapper
         
-        # Slot 1 (direction 기반)
+        # Slot 1 (통일된 계산: phy = zero_offset + theta1)
         zero_off1 = self.p1.get('zero_offset', 0)
-        if direction == 1:
-            phy1 = zero_off1 + theta1
-        else:
-            phy1 = zero_off1 - theta1
+        phy1 = zero_off1 + theta1
         phy1 = max(0, min(self.p1.get('actuation_range', 180), phy1))
         pls1 = mapper.physical_to_pulse(phy1, self.p1['motor_config'])
         
@@ -642,5 +628,8 @@ class FullSlot3Tab(BaseTabController):
             (self.p5['channel'], pls5),
             (self.p6['channel'], pls6),
         ]
+        # Debug logs
+        self.log(f"[FullSlot3] θ1={theta1:.1f}°, phy1={phy1:.1f}°, zero_off={zero_off1}")
+        self.log(f"[FullSlot3] Pulses: {pls1}, {pls2}, {pls3}, {pls4}, {pls5}, {pls6}")
         self.context.motion_planner.move_all(targets, duration)
         self.log(f"[FullSlot3] 6ch sent: Ch{self.p1['channel']}~{self.p6['channel']}")
