@@ -279,6 +279,23 @@ async def handle_cameras_status(request):
     })
 
 
+async def handle_cameras_roles(request):
+    """GET /api/cameras/roles - Get current role→camera mapping for client initialization.
+    
+    This endpoint allows clients to fetch the latest role assignments
+    before establishing WebRTC connections, enabling proper role-based abstraction.
+    
+    Returns:
+        {
+            "TopView": {"index": 2, "connected": true, "name": "Web Camera", "path": "..."},
+            "QuarterView": {"index": 3, "connected": true, "name": "Web Camera", "path": "..."},
+            ...
+        }
+    """
+    roles = match_roles()
+    return web.json_response(roles)
+
+
 async def handle_cameras_focus(request):
     """POST /api/cameras/focus - Set focus for a camera"""
     data = await request.json()
@@ -642,6 +659,24 @@ async def broadcast_camera_change(cameras):
 # Static Files & App Setup
 # =============================================================================
 
+async def start_camera_polling():
+    """Background task for camera hot-plug detection.
+    
+    Polls for camera changes every 3 seconds and broadcasts updates via WebSocket.
+    This allows settings.html to auto-refresh when cameras are added/removed.
+    """
+    from src.camera_manager import start_polling
+    
+    async def on_camera_change(added, removed, cameras):
+        logger.info(f"Camera change detected: +{len(added)} added, -{len(removed)} removed")
+        await broadcast_camera_change(cameras)
+    
+    try:
+        await start_polling(on_camera_change, interval=3)
+    except Exception as e:
+        logger.error(f"Camera polling error: {e}")
+
+
 async def init_app():
     """Initialize application"""
     global brain
@@ -650,23 +685,38 @@ async def init_app():
     brain = GeminiBrain()
     logger.info("Gemini brain initialized")
     
-    # Initialize all role-mapped cameras
-    camera_indices = []
-    role_status = {}
+    # =========================================================================
+    # Phase 1: Initialize ALL physical cameras (not just role-mapped)
+    # =========================================================================
+    from src.camera_mapping import get_available_devices
     
-    for role in VALID_ROLES:
-        idx = get_index_by_role(role)
-        if idx is not None:
-            camera_indices.append(idx)
-            role_status[role] = idx
-        else:
-            role_status[role] = None
+    # Discover all connected USB video devices
+    devices = get_available_devices()
+    logger.info(f"Found {len(devices)} USB video devices")
+    
+    # Filter out virtual devices (Logi Capture, OBS Virtual Camera, etc.)
+    VIRTUAL_KEYWORDS = ["capture", "virtual", "obs"]
+    physical_devices = [
+        d for d in devices
+        if not any(kw in d["name"].lower() for kw in VIRTUAL_KEYWORDS)
+    ]
+    logger.info(f"Physical cameras: {len(physical_devices)}")
+    
+    # Initialize ALL physical cameras
+    camera_indices = [d["index"] for d in physical_devices]
     
     if camera_indices:
         init_cameras(camera_indices, width=1920, height=1080)
-        logger.info(f"Cameras initialized: {role_status}")
+        logger.info(f"Cameras initialized: {camera_indices}")
         
-        # Apply saved settings to each camera
+        # Build role status for logging
+        role_status = {}
+        for role in VALID_ROLES:
+            idx = get_index_by_role(role)
+            role_status[role] = idx
+        logger.info(f"Role mapping: {role_status}")
+        
+        # Apply saved settings only to role-assigned cameras
         all_settings = get_all_settings()
         for role, info in all_settings.items():
             if info["connected"] and info["index"] is not None:
@@ -685,7 +735,12 @@ async def init_app():
     else:
         # Fallback to default camera 0
         init_cameras([0], width=1920, height=1080)
-        logger.warning("No role-mapped cameras found, using default camera 0")
+        logger.warning("No physical cameras found, using default camera 0")
+    
+    # =========================================================================
+    # Phase 2: Start background polling for camera hot-plug detection
+    # =========================================================================
+    asyncio.create_task(start_camera_polling())
 
 
 def create_app():
@@ -715,6 +770,7 @@ def create_app():
         web.post('/api/cameras/scan', handle_cameras_scan),
         web.post('/api/cameras/assign', handle_cameras_assign),
         web.get('/api/cameras/status', handle_cameras_status),
+        web.get('/api/cameras/roles', handle_cameras_roles),
         web.get('/api/stream/{camera}', handle_stream),
         # Camera Control API
         web.post('/api/cameras/focus', handle_cameras_focus),

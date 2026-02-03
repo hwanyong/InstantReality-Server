@@ -12,7 +12,8 @@ import { showToast, showSuccess, showError } from './lib/toast.mjs'
 
 const API_BASE = ''
 let ir = null
-const ROLES = ['TopView', 'QuarterView', 'RightRobot', 'LeftRobot']
+// ROLES is now dynamically fetched from server (not hardcoded)
+let ROLES = []
 
 // UI Elements
 const elements = {
@@ -50,8 +51,20 @@ const elements = {
 async function initWebRTC() {
     ir = new InstantReality({ serverUrl: API_BASE })
 
+    // 1. Fetch role mapping from server FIRST (dynamic, not hardcoded)
+    try {
+        const roleMap = await ir.getRoles()
+        // Get only connected roles in defined order
+        const orderedRoles = ['TopView', 'QuarterView', 'RightRobot', 'LeftRobot']
+        ROLES = orderedRoles.filter(r => roleMap[r] && roleMap[r].connected)
+        console.log('Dynamic ROLES from server:', ROLES, roleMap)
+    } catch (err) {
+        console.error('Failed to fetch roles, using fallback:', err)
+        ROLES = ['TopView', 'QuarterView', 'RightRobot', 'LeftRobot']
+    }
+
     ir.on('track', (track, index, roleName) => {
-        // Use dynamically mapped role if available, otherwise fallback to static index
+        // roleName is now provided by server - trustworthy
         const role = roleName || ROLES[index]
         console.log(`Received track ${index}, mapped to role: ${role}`)
 
@@ -79,7 +92,7 @@ async function initWebRTC() {
         showError('카메라 연결 끊김')
     })
 
-    // Connect with specific roles
+    // 2. Connect with dynamically fetched roles
     await ir.connect({ roles: ROLES })
 
     // Initialize pause buttons after connection

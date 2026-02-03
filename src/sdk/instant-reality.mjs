@@ -73,8 +73,42 @@ export class InstantReality {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    // Role Mapping Methods
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Fetch current role→camera mapping from server.
+     * Should be called before connect() to get latest role assignments.
+     * 
+     * @returns {Promise<Object>} Role map: {TopView: {index, connected, name}, ...}
+     */
+    async getRoles() {
+        const res = await fetch(`${this.serverUrl}/api/cameras/roles`)
+        if (!res.ok) {
+            throw new Error(`Failed to fetch roles: ${res.status}`)
+        }
+        this.roleMap = await res.json()
+        this.emit('roleMapReady', this.roleMap)
+        return this.roleMap
+    }
+
+    /**
+     * Get roles that are currently connected (have cameras assigned).
+     * Requires getRoles() to be called first.
+     * 
+     * @returns {string[]} Array of connected role names
+     */
+    getConnectedRoles() {
+        if (!this.roleMap) return []
+        return Object.entries(this.roleMap)
+            .filter(([_, info]) => info.connected)
+            .map(([role, _]) => role)
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
     // WebRTC Core Methods
     // ─────────────────────────────────────────────────────────────────────────
+
 
     async connect(options = {}) {
         const config = {
