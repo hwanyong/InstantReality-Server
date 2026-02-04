@@ -222,8 +222,8 @@ def compute_reach(config, arm, point_data, is_vertex=True):
         return math.radians(logical)
 
     if is_vertex:
-        # Vertex: Full FK with Slots 2-6 (Euclidean distance)
-        # Same as Share Point - include all arm segments to gripper tip
+        # Vertex: FK horizontal projection (fk_x only) for 2D coordinate calculation
+        # Note: fk_y is vertical component which doesn't affect top-view position
         slot2_cfg = config.get(arm, {}).get("slot_2", {})
         slot3_cfg = config.get(arm, {}).get("slot_3", {})
         slot4_cfg = config.get(arm, {}).get("slot_4", {})
@@ -244,16 +244,18 @@ def compute_reach(config, arm, point_data, is_vertex=True):
         angle_elbow = theta2 + theta3
         angle_wrist = theta2 + theta3 + theta4
 
-        # FK: (x, y) coordinates relative to base
-        x = (a2 * math.cos(angle_shoulder) +
-             a3 * math.cos(angle_elbow) +
-             (a4 + a5 + a6) * math.cos(angle_wrist))
+        # FK coordinates
+        fk_x = (a2 * math.cos(angle_shoulder) +
+                a3 * math.cos(angle_elbow) +
+                (a4 + a5 + a6) * math.cos(angle_wrist))
+        
+        fk_y = (a2 * math.sin(angle_shoulder) +
+                a3 * math.sin(angle_elbow) +
+                (a4 + a5 + a6) * math.sin(angle_wrist))
 
-        y = (a2 * math.sin(angle_shoulder) +
-             a3 * math.sin(angle_elbow) +
-             (a4 + a5 + a6) * math.sin(angle_wrist))
-
-        return math.sqrt(x**2 + y**2)
+        # Return tuple: (horizontal_reach, 3d_reach)
+        # horizontal for coordinate calc, 3d for distance display
+        return (abs(fk_x), math.sqrt(fk_x**2 + fk_y**2))
     else:
         # Share Point: Full FK with Slots 2-6 (Euclidean distance)
         slot2_cfg = config.get(arm, {}).get("slot_2", {})
@@ -393,19 +395,19 @@ def compute_geometry(config):
 
         base = geometry["bases"][owner]
         
-        # Use FK planar projection (approach angle = 90° for vertices)
-        reach = compute_reach(config, owner, vertex, is_vertex=True)
+        # compute_reach returns (horizontal_reach, 3d_reach) for vertices
+        reach_horiz, reach_3d = compute_reach(config, owner, vertex, is_vertex=True)
         yaw = compute_yaw(config, owner, vertex)
 
-        # Vertex position = base + reach in yaw direction
-        vx = base["x"] + reach * (-math.sin(yaw))  # -sin for +X=right
-        vy = base["y"] + reach * math.cos(yaw)
+        # Vertex position = base + horizontal reach in yaw direction
+        vx = base["x"] + reach_horiz * (-math.sin(yaw))  # -sin for +X=right
+        vy = base["y"] + reach_horiz * math.cos(yaw)
 
         geometry["vertices"][str(vid)] = {
             "x": round(vx, 1),
             "y": round(vy, 1),
             "owner": owner,
-            "reach": round(reach, 1)
+            "reach": round(reach_3d, 1)  # 3D reach for display
         }
 
 

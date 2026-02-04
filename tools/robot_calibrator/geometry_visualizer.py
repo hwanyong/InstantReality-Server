@@ -439,7 +439,7 @@ def on_verify_click(event):
     global config, ax, fig
     
     print("\n" + "="*60)
-    print("═══ FK/IK ROUNDTRIP VERIFICATION ═══")
+    print("=== FK/IK ROUNDTRIP VERIFICATION ===")
     print("="*60)
     
     geometry = compute_geometry(config)
@@ -466,7 +466,7 @@ def on_verify_click(event):
         if v['ik_theta1'] is not None:
             print(f"  IK θ1: {v['ik_theta1']:.1f}°")
             print(f"  Error: {v['error']:.1f}°")
-            print(f"  Status: {'✓ PASS' if v['error'] < 5 else '✗ FAIL'}")
+            print(f"  Status: {'[PASS]' if v['error'] < 5 else '[FAIL]'}")
         else:
             print(f"  IK: Unreachable")
     
