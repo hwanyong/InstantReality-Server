@@ -455,6 +455,40 @@ async def handle_servo_config_save(request):
 
 
 # =============================================================================
+# Calibration API
+# =============================================================================
+
+async def handle_calibration_geometry(request):
+    """GET /api/calibration/geometry - Get geometry section from servo_config.json
+    
+    Returns:
+        {
+            "coordinate_system": "+X=right, +Y=up",
+            "bases": {"left_arm": {...}, "right_arm": {...}},
+            "vertices": {"1": {...}, "2": {...}, ...},
+            "distances": {...}
+        }
+    """
+    config_path = PROJECT_ROOT / "servo_config.json"
+    
+    if not config_path.exists():
+        return web.json_response({"error": "servo_config.json not found"}, status=404)
+    
+    try:
+        with open(config_path, 'r', encoding='utf-8') as f:
+            config = json.load(f)
+        
+        geometry = config.get("geometry", {})
+        if not geometry:
+            return web.json_response({"error": "geometry section not found in config"}, status=404)
+        
+        return web.json_response(geometry)
+    except json.JSONDecodeError as e:
+        return web.json_response({"error": f"Invalid JSON: {e}"}, status=500)
+    except Exception as e:
+        return web.json_response({"error": str(e)}, status=500)
+
+# =============================================================================
 # WebRTC Handlers
 # =============================================================================
 
@@ -783,6 +817,8 @@ def create_app():
         # Servo Config API
         web.get('/api/servo_config', handle_servo_config_get),
         web.post('/api/servo_config', handle_servo_config_save),
+        # Calibration API
+        web.get('/api/calibration/geometry', handle_calibration_geometry),
     ]
     
     for route in api_routes:

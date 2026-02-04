@@ -1,20 +1,25 @@
+"""Test geometry engine module directly."""
+
 from servo_manager import ServoManager
+from geometry_engine import compute_reach, compute_geometry
 import math
 
+
+# Load config via ServoManager
 m = ServoManager()
 
-# Check V1 and V3 reach
+# Check V1 and V3 reach using geometry_engine functions
 v1 = m.config['vertices']['1']
 v3 = m.config['vertices']['3']
 
 print("=== V1 (left_arm) ===")
 print("Angles:", v1.get('angles'))
-r1 = m.compute_reach('left_arm', v1, True)
+r1 = compute_reach(m.config, 'left_arm', v1, True)
 print("Reach:", r1)
 
 print("\n=== V3 (right_arm) ===")
 print("Angles:", v3.get('angles'))
-r3 = m.compute_reach('right_arm', v3, True)
+r3 = compute_reach(m.config, 'right_arm', v3, True)
 print("Reach:", r3)
 
 # Debug FK calculation for V3
@@ -44,3 +49,10 @@ a2 = slot2_cfg.get('length', 0)
 a3 = slot3_cfg.get('length', 0)
 r = a2 * math.cos(math.radians(theta2)) + a3 * math.cos(math.radians(theta2 + theta3))
 print(f"Calculated reach: {a2}*{math.cos(math.radians(theta2)):.4f} + {a3}*{math.cos(math.radians(theta2+theta3)):.4f} = {r:.1f}")
+
+# Test compute_geometry through ServoManager wrapper
+print("\n=== Testing ServoManager.compute_geometry() wrapper ===")
+result = m.compute_geometry()
+print(f"Bases: {list(result['bases'].keys())}")
+print(f"Vertices: {list(result['vertices'].keys())}")
+print(f"Base to base distance: {result['distances']['base_to_base']}")

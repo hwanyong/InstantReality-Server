@@ -5,6 +5,7 @@
 
 import InstantReality from '/sdk/instant-reality.mjs'
 import { showToast, showSuccess, showError } from './lib/toast.mjs'
+import { computeHomography, applyHomography, isValidHomography, computeReprojectionError } from './transform.mjs'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Globals
@@ -319,15 +320,18 @@ async function detectGripper() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 const overlayState = {
-    tool: 'vertex',  // 'vertex', 'left-base', 'right-base', 'left-gripper', 'right-gripper'
+    tool: 'vertex',  // 'vertex' only (base markers are auto-calculated)
     vertices: [],    // [{x, y}, ...] - viewBox (original video) coordinates
-    leftBase: null,  // {x, y}
-    rightBase: null, // {x, y}
-    leftGripper: null,   // {x, y}
-    rightGripper: null,  // {x, y}
+    leftBase: null,  // {x, y} - auto-calculated from homography
+    rightBase: null, // {x, y} - auto-calculated from homography
+    sharePoint: null,    // {x, y} - auto-calculated (origin in robot coords)
     selectedVertex: null,  // index of selected vertex
     isDragging: false,
     dragStart: null,  // {x, y} - for click vs drag detection
+    // Calibration state
+    homographyMatrix: null,  // 3x3 matrix
+    isCalibrated: false,
+    robotGeometry: null,     // cached geometry from server
 }
 
 const SVG_NS = 'http://www.w3.org/2000/svg'
@@ -504,21 +508,26 @@ function renderOverlay() {
     }
 
     // Render markers
+    // Share point (auto-calculated, shown in green)
+    if (overlayState.sharePoint && overlayState.isCalibrated) {
+        const marker = createMarkerElement('share-point', overlayState.sharePoint, '#22c55e', '●')
+        marker.classList.add('calibrated-marker')
+        markerGroup.appendChild(marker)
+    }
+    // Base markers (auto-calculated)
     if (overlayState.leftBase) {
-        markerGroup.appendChild(createMarkerElement('left-base', overlayState.leftBase, '#ff6b6b', 'L'))
+        const marker = createMarkerElement('left-base', overlayState.leftBase, '#ff6b6b', 'L')
+        if (overlayState.isCalibrated) marker.classList.add('calibrated-marker')
+        markerGroup.appendChild(marker)
     }
     if (overlayState.rightBase) {
-        markerGroup.appendChild(createMarkerElement('right-base', overlayState.rightBase, '#4dabf7', 'R'))
-    }
-    if (overlayState.leftGripper) {
-        markerGroup.appendChild(createMarkerElement('left-gripper', overlayState.leftGripper, '#ff6b6b', '★'))
-    }
-    if (overlayState.rightGripper) {
-        markerGroup.appendChild(createMarkerElement('right-gripper', overlayState.rightGripper, '#4dabf7', '★'))
+        const marker = createMarkerElement('right-base', overlayState.rightBase, '#4dabf7', 'R')
+        if (overlayState.isCalibrated) marker.classList.add('calibrated-marker')
+        markerGroup.appendChild(marker)
     }
 }
 
-// Handle SVG background click (add vertex or marker)
+// Handle SVG background click (add vertex only - base/share are auto-calculated)
 function handleSVGClick(e) {
     // Ignore if clicking on existing element
     if (e.target.closest('.vertex') || e.target.closest('.marker') || e.target.closest('.delete-btn')) {
@@ -528,23 +537,13 @@ function handleSVGClick(e) {
     const coords = getSVGCoordinates(e)
     if (!coords) return
 
-    switch (overlayState.tool) {
-        case 'vertex':
-            overlayState.vertices.push({ x: coords.x, y: coords.y })
-            overlayState.selectedVertex = null
-            break
-        case 'left-base':
-            overlayState.leftBase = { x: coords.x, y: coords.y }
-            break
-        case 'right-base':
-            overlayState.rightBase = { x: coords.x, y: coords.y }
-            break
-        case 'left-gripper':
-            overlayState.leftGripper = { x: coords.x, y: coords.y }
-            break
-        case 'right-gripper':
-            overlayState.rightGripper = { x: coords.x, y: coords.y }
-            break
+    // Only vertex tool is interactive
+    if (overlayState.tool == 'vertex') {
+        overlayState.vertices.push({ x: coords.x, y: coords.y })
+        overlayState.selectedVertex = null
+        // Clear calibration when vertices change
+        overlayState.isCalibrated = false
+        overlayState.homographyMatrix = null
     }
 
     renderOverlay()
@@ -613,12 +612,19 @@ function initOverlayTools() {
             overlayState.vertices = []
             overlayState.leftBase = null
             overlayState.rightBase = null
-            overlayState.leftGripper = null
-            overlayState.rightGripper = null
+            overlayState.sharePoint = null
             overlayState.selectedVertex = null
+            overlayState.homographyMatrix = null
+            overlayState.isCalibrated = false
             renderOverlay()
             showSuccess('오버레이 초기화됨')
         })
+    }
+
+    // Calculate button - trigger homography calibration
+    const calcBtn = document.getElementById('calc-btn')
+    if (calcBtn) {
+        calcBtn.addEventListener('click', runCalibration)
     }
 
     // SVG events
@@ -670,11 +676,139 @@ function getOverlayData() {
             left: overlayState.leftBase,
             right: overlayState.rightBase
         },
-        grippers: {
-            left: overlayState.leftGripper,
-            right: overlayState.rightGripper
+        sharePoint: overlayState.sharePoint,
+        calibration: {
+            isCalibrated: overlayState.isCalibrated,
+            homographyMatrix: overlayState.homographyMatrix
         }
     }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Calibration - Homography with Coordinate Normalization
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Normalize robot coordinates to match pixel coordinate system orientation.
+ * Robot: +X=right, +Y=up  -->  Normalized: +X=right, +Y=down (same as screen)
+ * @param {{x: number, y: number}} robotPoint
+ * @returns {[number, number]} [normalizedX, normalizedY]
+ */
+function normalizeRobotCoord(robotPoint) {
+    // Robot +X (right) -> Normalized +X (right in screen) - same direction
+    // Robot +Y (up) -> Normalized -Y (down in screen) - inverted
+    // 
+    // After analysis: Robot and Screen share the same X axis direction.
+    // Only Y axis needs inversion.
+    return [robotPoint.x, -robotPoint.y]
+}
+
+/**
+ * Fetch geometry data from servo_config.json via server API
+ */
+async function fetchGeometry() {
+    try {
+        const res = await fetch(`${API_BASE}/api/calibration/geometry`)
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        const data = await res.json()
+        overlayState.robotGeometry = data
+        return data
+    } catch (e) {
+        showError(`Geometry 로드 실패: ${e.message}`)
+        return null
+    }
+}
+
+/**
+ * Run calibration: compute homography from 4 vertices and auto-display base/share markers
+ */
+async function runCalibration() {
+    // 1. Validate vertex count
+    if (overlayState.vertices.length < 4) {
+        showError(`최소 4개의 Vertex가 필요합니다 (현재: ${overlayState.vertices.length}개)`)
+        return
+    }
+
+    showToast('캘리브레이션 계산 중...')
+
+    // 2. Fetch geometry from server
+    const geometry = await fetchGeometry()
+    if (!geometry || !geometry.vertices || !geometry.bases) {
+        showError('서버에서 geometry 데이터를 가져올 수 없습니다')
+        return
+    }
+
+    // 3. Prepare pixel points (from UI)
+    const pixelPoints = overlayState.vertices.slice(0, 4).map(v => [v.x, v.y])
+
+    // 4. Prepare normalized robot points (transform to match screen orientation)
+    // Robot: +X=right, +Y=up  -->  Normalized: +X=right, -Y=up
+    const normalizedRobotPoints = []
+    for (let i = 1; i <= 4; i++) {
+        const vertex = geometry.vertices[String(i)]
+        if (!vertex) {
+            showError(`Vertex ${i}이(가) servo_config.json에 없습니다`)
+            return
+        }
+        normalizedRobotPoints.push(normalizeRobotCoord({ x: vertex.x, y: vertex.y }))
+    }
+
+    console.log('Calibration input:', {
+        pixelPoints,
+        normalizedRobotPoints
+    })
+
+    // 5. Compute Homography (normalized robot -> pixel)
+    // NOTE: We compute in this direction so we can apply H directly (no inverse needed)
+    let H
+    try {
+        H = computeHomography(normalizedRobotPoints, pixelPoints)
+    } catch (e) {
+        showError(`Homography 계산 실패: ${e.message}`)
+        return
+    }
+
+    // 6. Validate homography
+    if (!isValidHomography(H)) {
+        showError('유효하지 않은 Homography 행렬입니다. Vertex 위치를 확인하세요.')
+        return
+    }
+
+    // 7. Compute reprojection error (robot -> pixel direction)
+    const error = computeReprojectionError(H, normalizedRobotPoints, pixelPoints)
+    console.log(`Calibration reprojection error: ${error.toFixed(4)}`)
+
+    // 8. Store homography
+    overlayState.homographyMatrix = H
+
+    // 9. Transform base and share point coords: normalized robot -> pixel
+    // Using applyHomography directly (not inverse)
+    try {
+        const leftBaseNorm = normalizeRobotCoord(geometry.bases.left_arm)
+        const rightBaseNorm = normalizeRobotCoord(geometry.bases.right_arm)
+        const sharePointNorm = normalizeRobotCoord({ x: 0, y: 0 })
+
+        console.log('Normalized coords:', { leftBaseNorm, rightBaseNorm, sharePointNorm })
+
+        overlayState.leftBase = applyHomography(H, { x: leftBaseNorm[0], y: leftBaseNorm[1] })
+        overlayState.rightBase = applyHomography(H, { x: rightBaseNorm[0], y: rightBaseNorm[1] })
+        overlayState.sharePoint = applyHomography(H, { x: sharePointNorm[0], y: sharePointNorm[1] })
+    } catch (e) {
+        showError(`변환 실패: ${e.message}`)
+        return
+    }
+
+    // 10. Mark as calibrated and render
+    overlayState.isCalibrated = true
+    renderOverlay()
+
+    showSuccess('캘리브레이션(Homography) 완료!')
+    console.log('Calibration results:', {
+        leftBase: overlayState.leftBase,
+        rightBase: overlayState.rightBase,
+        sharePoint: overlayState.sharePoint,
+        reprojectionError: error
+    })
 }
 
 

@@ -128,6 +128,30 @@
             border-radius: 4px;
         }
 
+        /* Calibrated markers - auto-calculated positions */
+        #overlay-svg .calibrated-marker {
+            pointer-events: none;
+            animation: pulse 2s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+
+            0%,
+            100% {
+                opacity: 0.8;
+            }
+
+            50% {
+                opacity: 1;
+            }
+        }
+
+        #overlay-svg .share-point-marker {
+            fill: #22c55e;
+            stroke: #fff;
+            stroke-width: 3;
+        }
+
         /* Main Toolbar */
         .main-toolbar {
             display: flex;
@@ -423,11 +447,13 @@
             <!-- Main Toolbar -->
             <div id="overlay-toolbar" class="main-toolbar">
                 <button id="tool-vertex" class="tool-btn active" data-tool="vertex">⬡ Add Vertex</button>
-                <button id="tool-left-base" class="tool-btn" data-tool="left-base">◆ Left Base</button>
-                <button id="tool-right-base" class="tool-btn" data-tool="right-base">◆ Right Base</button>
-                <button id="tool-left-gripper" class="tool-btn" data-tool="left-gripper">★ Left Gripper</button>
-                <button id="tool-right-gripper" class="tool-btn" data-tool="right-gripper">★ Right Gripper</button>
                 <button id="tool-clear" class="tool-btn" style="border-color: var(--danger);">🗑 Clear All</button>
+
+                <div class="toolbar-divider"></div>
+
+                <button id="calc-btn" class="tool-btn"
+                    style="border-color: #22c55e; background: #22c55e; color: #000; font-weight: 600;">🔗
+                    Calculate</button>
 
                 <div class="toolbar-divider"></div>
 
