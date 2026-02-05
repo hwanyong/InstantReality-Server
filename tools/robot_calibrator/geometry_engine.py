@@ -19,7 +19,139 @@ KINEMATICS_CONSTANTS = {
 }
 
 
-# ========== Helper Functions ==========
+# ========== Trilateration Functions ==========
+
+def circle_intersection(c1, r1, c2, r2):
+    """
+    Find intersection points of two circles.
+    
+    Args:
+        c1: Center of first circle (x, y)
+        r1: Radius of first circle
+        c2: Center of second circle (x, y)
+        r2: Radius of second circle
+    
+    Returns:
+        Tuple of two points ((x1, y1), (x2, y2)) or None if no intersection
+    """
+    x1, y1 = c1
+    x2, y2 = c2
+    d = math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
+    
+    # Check if circles intersect
+    if d > r1 + r2 or d < abs(r1 - r2) or d == 0:
+        return None
+    
+    a = (r1 ** 2 - r2 ** 2 + d ** 2) / (2 * d)
+    h_sq = r1 ** 2 - a ** 2
+    if h_sq < 0:
+        return None
+    h = math.sqrt(h_sq)
+    
+    # Point on line between centers
+    px = x1 + a * (x2 - x1) / d
+    py = y1 + a * (y2 - y1) / d
+    
+    # Two intersection points
+    p1 = (px + h * (y2 - y1) / d, py - h * (x2 - x1) / d)
+    p2 = (px - h * (y2 - y1) / d, py + h * (x2 - x1) / d)
+    
+    return p1, p2
+
+
+def compute_share_to_vertex(config, arm, vertex, base_pos):
+    """
+    Compute distance from Share Point (origin) to Vertex.
+    Uses the yaw-based coordinate calculation to find vertex position,
+    then calculates distance to origin.
+    
+    Args:
+        config: Full servo configuration dict
+        arm: 'left_arm' or 'right_arm'
+        vertex: Vertex data dict with 'angles'
+        base_pos: Base position tuple (x, y)
+    
+    Returns:
+        float: Distance from share point to vertex
+    """
+    # Get reach (horizontal projection for coordinate calculation)
+    a2 = config.get(arm, {}).get("slot_2", {}).get("length", 0)
+    a3 = config.get(arm, {}).get("slot_3", {}).get("length", 0)
+    a4 = config.get(arm, {}).get("slot_4", {}).get("length", 0)
+    a5 = config.get(arm, {}).get("slot_5", {}).get("length", 0)
+    a6 = config.get(arm, {}).get("slot_6", {}).get("length", 0)
+    
+    angles = vertex.get("angles", {})
+    
+    def get_logical_angle(slot_num):
+        slot_cfg = config.get(arm, {}).get(f"slot_{slot_num}", {})
+        physical = angles.get(f"slot_{slot_num}", slot_cfg.get("zero_offset", 0))
+        zero_offset = slot_cfg.get("zero_offset", 0)
+        min_pos = slot_cfg.get("min_pos", "")
+        
+        if min_pos in ["top", "left", "cw"]:
+            return math.radians(zero_offset - physical)
+        else:
+            return math.radians(physical - zero_offset)
+    
+    theta2 = get_logical_angle(2)
+    theta3 = get_logical_angle(3)
+    theta4 = get_logical_angle(4)
+    
+    angle_shoulder = theta2
+    angle_elbow = theta2 + theta3
+    angle_wrist = theta2 + theta3 + theta4
+    
+    # Horizontal reach (for X-Y plane)
+    fk_x = (a2 * math.cos(angle_shoulder) +
+            a3 * math.cos(angle_elbow) +
+            (a4 + a5 + a6) * math.cos(angle_wrist))
+    
+    reach_horiz = abs(fk_x)
+    
+    # Get yaw angle
+    slot1_cfg = config.get(arm, {}).get("slot_1", {})
+    physical_yaw = angles.get("slot_1", slot1_cfg.get("zero_offset", 0))
+    zero_offset = slot1_cfg.get("zero_offset", 0)
+    min_pos = slot1_cfg.get("min_pos", "")
+    
+    if min_pos in ["left", "cw"]:
+        yaw = math.radians(zero_offset - physical_yaw)
+    else:
+        yaw = math.radians(physical_yaw - zero_offset)
+    
+    # Calculate vertex position using yaw-based transform
+    vx = base_pos[0] + reach_horiz * (-math.sin(yaw))
+    vy = base_pos[1] + reach_horiz * math.cos(yaw)
+    
+    # Return distance from origin (share point) to vertex
+    return math.sqrt(vx ** 2 + vy ** 2)
+
+
+def select_vertex_by_yaw(p1, p2, base, yaw):
+    """
+    Select the correct intersection point based on yaw direction.
+    Uses the old yaw-based calculation as reference to pick correct point.
+    
+    Args:
+        p1, p2: Two candidate points from circle intersection
+        base: Base position (x, y)
+        yaw: Yaw angle in radians
+    
+    Returns:
+        The point that best matches the yaw direction
+    """
+    reach = math.sqrt((p1[0] - base[0]) ** 2 + (p1[1] - base[1]) ** 2)
+    expected_x = base[0] + reach * (-math.sin(yaw))
+    expected_y = base[1] + reach * math.cos(yaw)
+    
+    dist1 = math.sqrt((p1[0] - expected_x) ** 2 + (p1[1] - expected_y) ** 2)
+    dist2 = math.sqrt((p2[0] - expected_x) ** 2 + (p2[1] - expected_y) ** 2)
+    
+    return p1 if dist1 < dist2 else p2
+
+
+
 
 def compute_delta_angle(config, arm, slot_num, point_data):
     """
@@ -383,7 +515,10 @@ def compute_geometry(config):
             "sources": 1
         }
 
-    # 3. Compute Vertex positions relative to origin (1-8) using FK planar projection
+    # 3. Compute Vertex positions using TRILATERATION
+    # Uses Share→Vertex and Base→Vertex distances to find exact position
+    share_point = (0, 0)
+    
     for vid in range(1, 9):
         vertex = config.get("vertices", {}).get(str(vid))
         if not vertex:
@@ -394,14 +529,25 @@ def compute_geometry(config):
             continue
 
         base = geometry["bases"][owner]
+        base_pos = (base["x"], base["y"])
         
-        # compute_reach returns (horizontal_reach, 3d_reach) for vertices
+        # Get distances for trilateration
         reach_horiz, reach_3d = compute_reach(config, owner, vertex, is_vertex=True)
+        share_to_v = compute_share_to_vertex(config, owner, vertex, base_pos)
         yaw = compute_yaw(config, owner, vertex)
-
-        # Vertex position = base + horizontal reach in yaw direction
-        vx = base["x"] + reach_horiz * (-math.sin(yaw))  # -sin for +X=right
-        vy = base["y"] + reach_horiz * math.cos(yaw)
+        
+        # Try trilateration: find intersection of two circles
+        # Circle 1: centered at Share Point, radius = share_to_vertex
+        # Circle 2: centered at Base, radius = reach_3d (Base→Vertex)
+        intersections = circle_intersection(share_point, share_to_v, base_pos, reach_3d)
+        
+        if intersections:
+            # Use yaw to select correct intersection point
+            vx, vy = select_vertex_by_yaw(intersections[0], intersections[1], base_pos, yaw)
+        else:
+            # Fallback to old yaw-based method if no intersection
+            vx = base["x"] + reach_horiz * (-math.sin(yaw))
+            vy = base["y"] + reach_horiz * math.cos(yaw)
 
         geometry["vertices"][str(vid)] = {
             "x": round(vx, 1),
