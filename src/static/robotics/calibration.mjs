@@ -356,15 +356,17 @@ function getSVGCoordinates(event) {
     return pt.matrixTransform(ctm.inverse())
 }
 
-// Update SVG viewBox to match video intrinsic size
-function updateViewBox() {
-    const video = document.getElementById('camera-0')
-    const svg = document.getElementById('overlay-svg')
-    if (!video || !svg) return
+// Original camera resolution (server capture size)
+const ORIGINAL_WIDTH = 1920
+const ORIGINAL_HEIGHT = 1080
 
-    if (video.videoWidth && video.videoHeight) {
-        svg.setAttribute('viewBox', `0 0 ${video.videoWidth} ${video.videoHeight}`)
-    }
+// Update SVG viewBox to match original camera resolution (not WebRTC stream size)
+function updateViewBox() {
+    const svg = document.getElementById('overlay-svg')
+    if (!svg) return
+
+    // Always use original camera resolution for coordinate consistency
+    svg.setAttribute('viewBox', `0 0 ${ORIGINAL_WIDTH} ${ORIGINAL_HEIGHT}`)
 }
 
 // Update polygon points attribute
@@ -821,14 +823,11 @@ async function runCalibration() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function saveCalibration() {
-    const video = elements.cameras[0]
-    if (!video) return
-
     const calibration = {
         timestamp: new Date().toISOString(),
         resolution: {
-            width: video.videoWidth || 1920,
-            height: video.videoHeight || 1080
+            width: ORIGINAL_WIDTH,
+            height: ORIGINAL_HEIGHT
         },
         homography_matrix: overlayState.homographyMatrix,
         pixel_coords: {
@@ -872,13 +871,12 @@ async function loadCalibration() {
         }
 
         const cal = await res.json()
-        const video = elements.cameras[0]
 
-        // Resolution mismatch warning
-        if (video && video.videoWidth && cal.resolution) {
-            if (cal.resolution.width != video.videoWidth ||
-                cal.resolution.height != video.videoHeight) {
-                showToast(`해상도 변경됨 (${cal.resolution.width}x${cal.resolution.height} → ${video.videoWidth}x${video.videoHeight}). 재캘리브레이션 권장`, 'warning')
+        // Resolution mismatch warning (check against original camera resolution)
+        if (cal.resolution) {
+            if (cal.resolution.width != ORIGINAL_WIDTH ||
+                cal.resolution.height != ORIGINAL_HEIGHT) {
+                showToast(`저장된 해상도(${cal.resolution.width}x${cal.resolution.height})가 현재 카메라 해상도(${ORIGINAL_WIDTH}x${ORIGINAL_HEIGHT})와 다릅니다. 재캘리브레이션 권장`, 'warning')
             }
         }
 
