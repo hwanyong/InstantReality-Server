@@ -1,346 +1,307 @@
-# servo_config.json 분석 보고서
+# servo_config.json 분석 문서
 
-> **분석 대상**: `ik_tester_gui.py`의 마지막 탭 (Tab 5: Full Slot) 기능과 `servo_config.json` 해석 방법
-> **분석 일시**: 2026-02-01
+## 1. 제로 포인트(0°) 정의
 
-## 1. 개요
-
-`servo_config.json`은 Gemini 로봇 제어 시스템의 **마스터 설정 파일**입니다. 이 파일은:
-- 독립 실행 `calibrator_gui.py`
-- `ik_tester_gui.py` (역기구학 테스터)
-- 메인 Gemini 서버
-
-세 가지 도구에서 공유됩니다.
+**0도는 팔을 테이블(장면) 방향으로 수평으로 뻗은 자세**를 의미합니다.
 
 ---
 
-## 2. 파일 구조
-
-### 2.1 최상위 구조
+## 2. 파일 구조 개요
 
 ```json
 {
-  "left_arm": { "slot_1": {...}, "slot_2": {...}, ... "slot_6": {...} },
-  "right_arm": { "slot_1": {...}, "slot_2": {...}, ... "slot_6": {...} },
-  "connection": { "port": "COM7" },
-  "vertices": { "1": {...}, "2": {...}, ... "8": {...} },
-  "share_points": { "left_arm": {...}, "right_arm": {...} },
-  "geometry": { ... }
-}
-```
-
-| 섹션 | 설명 |
-|------|------|
-| `left_arm`, `right_arm` | 각 팔의 6개 슬롯(관절) 설정 |
-| `connection` | 시리얼 포트 연결 정보 (데스크톱 도구용) |
-| `vertices` | 작업 영역 꼭짓점 8개 (캘리브레이션 포인트) |
-| `share_points` | 양팔이 공유하는 중심점 좌표 |
-| `geometry` | 사전 계산된 3D 좌표 및 거리 데이터 |
-
----
-
-## 3. 슬롯(관절) 프로퍼티 분석
-
-### 3.1 하드웨어 식별 속성
-
-| 프로퍼티 | 타입 | 설명 | 예시 |
-|----------|------|------|------|
-| `channel` | int | PCA9685 I2C 채널 (0-15) | `0`, `7` |
-| `device_name` | string | 모터 모델명 | `"DS3225"`, `"MG996R"` |
-| `type` | string | 운동학적 역할 | `"horizontal"`, `"vertical"`, `"roll"`, `"gripper"` |
-| `actuation_range` | int | 물리적 회전 범위 (도) | `180`, `270` |
-| `length` | float | 다음 관절까지의 링크 길이 (mm) | `107.0`, `150.0` |
-| `min_pos` | string | 최소 위치 방향 표시 | `"right"`, `"top"`, `"bottom"`, `"ccw"`, `"open"` |
-
-### 3.2 펄스 기반 속성 (Master Truth)
-
-> [!IMPORTANT]
-> **핵심 원칙**: 시스템은 **펄스 폭(µs)**을 **마스터 소스**로 취급합니다.
-> 모든 각도 값은 펄스에서 파생됩니다.
-
-| 프로퍼티 | 타입 | 설명 |
-|----------|------|------|
-| `pulse_min` | int | 0° 기준점의 PWM 펄스 |
-| `pulse_max` | int | 하드웨어 최대값의 이론적 펄스 |
-| `min_pulse` | int | **소프트웨어 안전 한계** (최소) |
-| `max_pulse_limit` | int | **소프트웨어 안전 한계** (최대) |
-| `zero_pulse` | int | "Zero" (수직 자세) 위치의 펄스 |
-| `initial_pulse` | int | "Home" (접힌 자세) 위치의 펄스 |
-
-### 3.3 파생 각도 속성 (View Projection)
-
-| 프로퍼티 | 타입 | 설명 |
-|----------|------|------|
-| `initial` | float | Home 위치의 물리적 각도 (°) |
-| `zero_offset` | float | 0° 기준점으로부터의 오프셋 각도 (°) |
-| `min` | float | 물리적 최소 한계 (°) |
-| `max` | float | 물리적 최대 한계 (°) |
-
----
-
-## 4. Full Slot 탭 (Tab 5) 기능 분석
-
-### 4.1 UI 구성
-
-```
-┌─────────────────┬─────────────────┬─────────────┐
-│  Top-Down View  │   Side View     │  Gripper    │
-│   (X/Y 입력)    │  (IK: R,Z→θ2,θ3)│   State     │
-│                 │                 │             │
-│  • Y 슬라이더   │  • Z 슬라이더   │  • 그리퍼   │
-│  • X 슬라이더   │  • S2-S6 상태   │    시각화   │
-│  • θ1 자동계산 │  • θ4 접근각도  │             │
-└─────────────────┴─────────────────┴─────────────┘
-```
-
-### 4.2 설정 로딩 워크플로우
-
-```python
-# _refresh_config() 에서 설정 로딩
-p1 = self.context.get_slot_params(1)  # Slot 1 파라미터
-p2 = self.context.get_slot_params(2)  # Slot 2 파라미터
-# ... p3 ~ p6
-
-# Side View 위젯에 링크 길이 전달
-self.side_widget.cfg['d1'] = p1.get('length', 107.0)  # Base 높이
-self.side_widget.cfg['a2'] = p2.get('length', 105.0)  # 상완
-self.side_widget.cfg['a3'] = p3.get('length', 150.0)  # 전완
-self.side_widget.cfg['a4'] = p4.get('length', 65.0)   # 손목
-```
-
-### 4.3 get_slot_params() 반환 구조
-
-```python
-{
-    'channel': 0,           # PCA9685 채널
-    'zero_offset': 137.6,   # Zero 위치 오프셋
-    'min': 107.3,           # 물리적 최소 한계
-    'max': 270.0,           # 물리적 최대 한계
-    'actuation_range': 270, # 모터 회전 범위
-    'type': 'vertical',     # 운동 유형
-    'min_pos': 'bottom',    # 최소 위치 방향
-    'polarity': 1,          # 극성 (+1 또는 -1)
-    'math_min': -30.0,      # 수학적 최소 (IK용)
-    'math_max': 132.4,      # 수학적 최대 (IK용)
-    'motor_config': {       # PulseMapper용
-        'actuation_range': 270,
-        'pulse_min': 500,
-        'pulse_max': 2500
-    },
-    'length': 105.0         # 링크 길이 (mm)
+  "right_arm": { "slot_1" ~ "slot_6" },
+  "left_arm":  { "slot_1" ~ "slot_6" },
+  "connection": { "port": "COM7" }
 }
 ```
 
 ---
 
-## 5. 극성(Polarity) 규칙
+## 3. 파라미터 정의 (전체)
 
-### 5.1 극성 결정 로직
-
-```python
-polarity = 1
-
-# Horizontal 타입: left → -1
-if typ == "horizontal" and min_pos == "left":
-    polarity = -1
-
-# Vertical 타입: top → -1, bottom → 1
-if typ == "vertical":
-    polarity = -1 if min_pos == "top" else 1
-```
-
-### 5.2 수학적 범위 계산
-
-```python
-# 물리적 한계를 수학적 프레임으로 변환
-bound_a = (limits["min"] - zero_offset) * polarity
-bound_b = (limits["max"] - zero_offset) * polarity
-
-math_min = min(bound_a, bound_b)
-math_max = max(bound_a, bound_b)
-```
+| 파라미터 | 타입 | 설명 |
+|---|---|---|
+| `channel` | int | PCA9685 PWM 보드의 채널 번호 (0~15) |
+| `min` | float | 소프트웨어 허용 최소 각도 |
+| `max` | float | 소프트웨어 허용 최대 각도 |
+| `type` | string | 관절 유형 (`horizontal`, `roll`, `gripper`, 또는 생략 시 수직 관절) |
+| `min_pos` | string | **최소 각도(min)일 때 물리적 위치** → 운동 극성 결정 |
+| `initial` | float | 시동 시 이동할 초기 각도 (°) |
+| `length` | float | 해당 링크의 물리적 길이 (mm) - IK 계산용 |
+| `zero_offset` | float | **제로 포인트(0°)에 해당하는 서보 원시 각도** |
+| `actuation_range` | int | 서보의 물리적 가동 범위 (180° 또는 270°) |
+| `pulse_min` | int | 서보 스펙상 최소 펄스 (μs) |
+| `pulse_max` | int | 서보 스펙상 최대 펄스 (μs) |
+| `device_name` | string | 서보 모델명 (DS3225, MG996R 등) |
+| `initial_pulse` | int | 시동 시 실제 출력할 펄스 값 (μs) |
+| `zero_pulse` | int | **0° 자세에 해당하는 펄스 값** (μs) - 캘리브레이션 핵심 |
+| `min_pulse` | int | 소프트웨어 허용 최소 펄스 (안전 제한) |
+| `max_pulse_limit` | int | 소프트웨어 허용 최대 펄스 (안전 제한) |
 
 ---
 
-## 6. 펄스-각도 변환 (PulseMapper)
+## 4. Right Arm 각 Slot별 상세 분석
 
-### 6.1 물리 각도 → 펄스 변환
+### Slot 1 - 베이스 회전 (Base Yaw)
 
-```python
-def physical_to_pulse(target_physical_deg, motor_config):
-    actuation_range = motor_config.get("actuation_range", 180)
-    pulse_min = motor_config.get("pulse_min", 500)
-    pulse_max = motor_config.get("pulse_max", 2500)
-    
-    # 비율 계산
-    ratio = target_physical_deg / actuation_range
-    pulse_us = pulse_min + (ratio * (pulse_max - pulse_min))
-    
-    return int(pulse_us)
-```
+| 속성 | 값 | 의미 |
+|---|---|---|
+| `channel` | 0 | PWM 채널 0 |
+| `type` | `horizontal` | 수평면 회전 |
+| `min_pos` | `right` | min(0°) → 오른쪽 |
+| `min` → `max` | 0° → 180° | 오른쪽 → 왼쪽 회전 |
+| `zero_offset` | 2.7° | 전방(수평 뻗음) = 서보 2.7° |
+| `length` | 107mm | 어깨 높이/베이스 오프셋 |
+| `actuation_range` | 180° | 180도 서보 |
+| `zero_pulse` | 530μs | 0° 위치 펄스 |
+| `device_name` | DS3225 | 서보 모델 |
 
-### 6.2 예시: DS3225 (270° 모터)
-
-| 물리 각도 | 비율 | 펄스 (µs) |
-|-----------|------|-----------|
-| 0° | 0.0 | 500 |
-| 90° | 0.333 | 1166 |
-| 135° | 0.5 | 1500 |
-| 270° | 1.0 | 2500 |
+**운동 방향**: 각도 증가 → **좌회전 (CCW)**
 
 ---
 
-## 7. IK 계산 흐름 (update_visualization)
+### Slot 2 - 어깨 (Shoulder Pitch)
 
-### 7.1 Step 1: θ1 계산 (Base Yaw)
+| 속성 | 값 | 의미 |
+|---|---|---|
+| `channel` | 1 | PWM 채널 1 |
+| `type` | (없음) | 수직 관절 |
+| `min_pos` | `bottom` | min(86.7°) → 아래 방향 |
+| `min` → `max` | 86.7° → 270° | 물리적 가동 범위 |
+| `zero_offset` | 126° | 전방 수평 = 서보 126° |
+| `actuation_range` | 270° | 270도 서보 사용 |
+| `length` | 105mm | 상완 길이 |
+| `zero_pulse` | 1433μs | 0° 위치 펄스 |
+| `device_name` | DS3225 | 서보 모델 |
 
-```python
-# Top-Down View에서 X, Y 입력
-theta1 = math.degrees(math.atan2(y, x))
-R = math.sqrt(x**2 + y**2)  # 수평 거리
-```
+**운동 방향**: 각도 증가 → **아래로 (Down)** / 각도 감소 → **위로 (Up)**
 
-### 7.2 Step 2: θ2, θ3 계산 (2-Link IK)
-
-```python
-# 손목 Z 높이 계산 (그리퍼가 -90°로 하향)
-wrist_z = z + a4 + a6
-
-# 2-Link IK 풀이
-theta2, theta3, is_reachable, config_name = _solve_2link_ik(R, wrist_z, d1, a2, a3)
-
-# Slot 3 반전 (min_pos: top)
-theta3 = -theta3
-```
-
-### 7.3 Step 3: θ4 계산 (접근 각도)
-
-```python
-# 그리퍼가 지면에 수직으로 유지되도록
-theta4 = -90.0 - theta2 + theta3
-```
-
-### 7.4 Step 4: 물리 각도 변환
-
-각 슬롯마다 다른 변환 규칙:
-
-| 슬롯 | 변환 공식 | 설명 |
-|------|-----------|------|
-| S1 | `phy = theta + zero_offset` | 단순 오프셋 |
-| S2 | `phy = theta + zero_offset` | 어깨 |
-| S3 | `phy = zero_offset + theta` | 팔꿈치 (반전 후) |
-| S4 | `phy = zero_offset - theta` | 손목 (top → 반전) |
-| S5 | `phy = theta + zero_offset` | 롤 (수동 입력) |
-| S6 | `phy = theta + zero_offset` | 그리퍼 (수동 입력) |
+> ⚠️ `min_pos: bottom`이므로, 소프트웨어 각도가 감소하면 팔이 **위**로 올라갑니다.
 
 ---
 
-## 8. Vertices & Share Points 구조
+### Slot 3 - 팔꿈치 (Elbow Pitch)
 
-### 8.1 Vertex (작업 영역 꼭짓점)
+| 속성 | 값 | 의미 |
+|---|---|---|
+| `channel` | 2 | PWM 채널 2 |
+| `type` | (없음) | 수직 관절 |
+| `min_pos` | `top` | min(0°) → 위 방향 (접힘) |
+| `min` → `max` | 0° → 259.9° | 접힘 → 펴짐 |
+| `zero_offset` | 108.7° | 전방 수평 = 서보 108.7° |
+| `actuation_range` | 270° | 270도 서보 |
+| `length` | 150mm | 전완 길이 |
+| `zero_pulse` | 1305μs | 0° 위치 펄스 |
+| `device_name` | DS3225 | 서보 모델 |
+
+**운동 방향**: 각도 증가 → **팔꿈치 펼침 (Extension)**
+
+---
+
+### Slot 4 - 손목 수평 회전 (Wrist Yaw)
+
+| 속성 | 값 | 의미 |
+|---|---|---|
+| `channel` | 3 | PWM 채널 3 |
+| `type` | `horizontal` | 수평면 회전 |
+| `min_pos` | `left` | min(0°) → 왼쪽 |
+| `min` → `max` | 0° → 180° | 왼쪽 → 오른쪽 |
+| `zero_offset` | 110° | 중립(직진) = 서보 110° |
+| `length` | 65mm | 손목 오프셋 |
+| `zero_pulse` | 1722μs | 0° 위치 펄스 |
+| `device_name` | DS3225 | 서보 모델 |
+
+**운동 방향**: 각도 증가 → **우회전 (CW)**
+
+---
+
+### Slot 5 - 손목 롤 (Wrist Roll)
+
+| 속성 | 값 | 의미 |
+|---|---|---|
+| `channel` | 4 | PWM 채널 4 |
+| `type` | `roll` | 롤 회전 |
+| `min_pos` | `ccw` | min(0°) → 반시계 방향 |
+| `min` → `max` | 0° → 180° | CCW → CW |
+| `zero_offset` | 85° | 중립 = 서보 85° |
+| `length` | 30mm | 손목 롤 세그먼트 |
+| `zero_pulse` | 1444μs | 0° 위치 펄스 |
+| `device_name` | MG996R | 서보 모델 |
+
+**운동 방향**: 각도 증가 → **시계방향 롤 (CW Roll)**
+
+---
+
+### Slot 6 - 그리퍼 (Gripper)
+
+| 속성 | 값 | 의미 |
+|---|---|---|
+| `channel` | 5 | PWM 채널 5 |
+| `type` | `gripper` | 그리퍼 |
+| `min_pos` | `open` | min(0°) → 완전 열림 |
+| `min` → `max` | 0° → 55.7° | 열림 → 닫힘 |
+| `zero_offset` | 0° | 열린 상태 = 0° |
+| `length` | 70mm | 그리퍼 길이 |
+| `zero_pulse` | 500μs | 0° 위치 펄스 |
+| `device_name` | MG996R | 서보 모델 |
+
+**운동 방향**: 각도 증가 → **닫힘 (Close)**
+
+---
+
+## 5. Left Arm 각 Slot별 상세 분석
+
+### Slot 1 - 베이스 회전 (Base Yaw)
+
+| 속성 | 값 | 의미 |
+|---|---|---|
+| `channel` | 6 | PWM 채널 6 |
+| `type` | `horizontal` | 수평면 회전 |
+| `min_pos` | `right` | min(0°) → 오른쪽 |
+| `min` → `max` | 0° → 180° | 오른쪽 → 왼쪽 회전 |
+| `zero_offset` | 171° | 전방 수평 = 서보 171° |
+| `length` | 107mm | 어깨 높이/베이스 오프셋 |
+| `zero_pulse` | 2400μs | 0° 위치 펄스 |
+| `device_name` | DS3225 | 서보 모델 |
+
+---
+
+### Slot 2 - 어깨 (Shoulder Pitch)
+
+| 속성 | 값 | 의미 |
+|---|---|---|
+| `channel` | 7 | PWM 채널 7 |
+| `min_pos` | `bottom` | min(107.6°) → 아래 방향 |
+| `min` → `max` | 107.6° → 270° | 물리적 가동 범위 |
+| `zero_offset` | 139.1° | 전방 수평 = 서보 139.1° |
+| `actuation_range` | 270° | 270도 서보 |
+| `length` | 105mm | 상완 길이 |
+| `zero_pulse` | 1530μs | 0° 위치 펄스 |
+| `device_name` | DS3225 | 서보 모델 |
+
+---
+
+### Slot 3 - 팔꿈치 (Elbow Pitch)
+
+| 속성 | 값 | 의미 |
+|---|---|---|
+| `channel` | 8 | PWM 채널 8 |
+| `min_pos` | `top` | min(0°) → 위 방향 |
+| `min` → `max` | 0° → 270° | 접힘 → 펴짐 |
+| `zero_offset` | 121° | 전방 수평 = 서보 121° |
+| `actuation_range` | 270° | 270도 서보 |
+| `length` | 150mm | 전완 길이 |
+| `zero_pulse` | 1396μs | 0° 위치 펄스 |
+| `device_name` | DS3225 | 서보 모델 |
+
+---
+
+### Slot 4 - 손목 수평 회전 (Wrist Yaw)
+
+| 속성 | 값 | 의미 |
+|---|---|---|
+| `channel` | 9 | PWM 채널 9 |
+| `type` | `horizontal` | 수평면 회전 |
+| `min_pos` | `left` | min(0°) → 왼쪽 |
+| `min` → `max` | 0° → 180° | 왼쪽 → 오른쪽 |
+| `zero_offset` | 91.2° | 중립 = 서보 91.2° |
+| `length` | 65mm | 손목 오프셋 |
+| `zero_pulse` | 1513μs | 0° 위치 펄스 |
+| `device_name` | DS3225 | 서보 모델 |
+
+---
+
+### Slot 5 - 손목 롤 (Wrist Roll)
+
+| 속성 | 값 | 의미 |
+|---|---|---|
+| `channel` | 10 | PWM 채널 10 |
+| `type` | `roll` | 롤 회전 |
+| `min_pos` | `ccw` | min(0°) → 반시계 방향 |
+| `min` → `max` | 0° → 180° | CCW → CW |
+| `zero_offset` | 90° | 중립 = 서보 90° |
+| `length` | 30mm | 손목 롤 세그먼트 |
+| `zero_pulse` | 1500μs | 0° 위치 펄스 |
+| `device_name` | MG996R | 서보 모델 |
+
+---
+
+### Slot 6 - 그리퍼 (Gripper)
+
+| 속성 | 값 | 의미 |
+|---|---|---|
+| `channel` | 11 | PWM 채널 11 |
+| `type` | `gripper` | 그리퍼 |
+| `min_pos` | `open` | min(126.4°) → 열림 |
+| `min` → `max` | 126.4° → 180° | 열림 → 닫힘 |
+| `zero_offset` | 126.4° | 열린 상태 = 126.4° |
+| `length` | 70mm | 그리퍼 길이 |
+| `zero_pulse` | 1904μs | 0° 위치 펄스 |
+| `device_name` | MG996R | 서보 모델 |
+
+---
+
+## 6. 운동 극성 요약
+
+### Right Arm
+
+| Slot | 관절 | `min_pos` | 각도 증가 시 운동 방향 |
+|---|---|---|---|
+| 1 | Base Yaw | `right` | → **Left (CCW)** |
+| 2 | Shoulder | `bottom` | → **Down** |
+| 3 | Elbow | `top` | → **Extension (펼침)** |
+| 4 | Wrist Yaw | `left` | → **Right (CW)** |
+| 5 | Wrist Roll | `ccw` | → **CW Roll** |
+| 6 | Gripper | `open` | → **Close** |
+
+### Left Arm
+
+| Slot | 관절 | `min_pos` | 각도 증가 시 운동 방향 |
+|---|---|---|---|
+| 1 | Base Yaw | `right` | → **Left (CCW)** |
+| 2 | Shoulder | `bottom` | → **Down** |
+| 3 | Elbow | `top` | → **Extension (펼침)** |
+| 4 | Wrist Yaw | `left` | → **Right (CW)** |
+| 5 | Wrist Roll | `ccw` | → **CW Roll** |
+| 6 | Gripper | `open` | → **Close** |
+
+---
+
+## 7. 핵심 캘리브레이션 관계식
+
+```
+펄스 = zero_pulse + (소프트웨어_각도 × 펄스_per_degree × polarity)
+```
+
+구성 요소:
+- **`zero_pulse`**: 0° 자세의 기준 펄스
+- **`polarity`**: `min_pos`에 따라 +1 또는 -1
+- **`펄스_per_degree`**: `(pulse_max - pulse_min) / actuation_range`
+
+---
+
+## 8. Left Arm vs Right Arm 주요 차이점
+
+Left Arm은 구조적으로 Right Arm과 **미러링**되어 있습니다:
+
+| 속성 | Right Arm | Left Arm |
+|---|---|---|
+| Slot 1 `initial` | 0° | 171° (반대쪽 향함) |
+| Slot 1 `zero_offset` | 2.7° | 171° |
+| Slot 2 `zero_offset` | 126° | 139.1° |
+| Slot 3 `zero_offset` | 108.7° | 121° |
+| Slot 4 `zero_offset` | 110° | 91.2° |
+| Slot 6 `min` | 0° | 126.4° (그리퍼 방향 반전) |
+
+---
+
+## 9. 연결 설정
 
 ```json
-"vertices": {
-  "1": {
-    "owner": "left_arm",
-    "pulses": {
-      "slot_1": 2459,
-      "slot_2": 1803,
-      "slot_3": 1666,
-      "slot_4": 1918,
-      "slot_5": 580,
-      "slot_6": 2720
-    },
-    "angles": {
-      "slot_1": 170.3,
-      "slot_2": 175.9,
-      "slot_3": 157.4,
-      "slot_4": 127.6,
-      "slot_5": 7.2,
-      "slot_6": 180
-    }
-  }
+"connection": {
+  "port": "COM7"
 }
 ```
 
-### 8.2 Share Point (공유 중심점)
-
-```json
-"share_points": {
-  "left_arm": {
-    "pulses": { "slot_1": 1664, ... },
-    "angles": { "slot_1": 98.7, ... }
-  }
-}
-```
-
----
-
-## 9. Geometry 블록
-
-### 9.1 좌표계 정의
-
-```json
-"geometry": {
-  "coordinate_system": "+X=up, +Y=left",
-  "origin": "share_point"
-}
-```
-
-| 축 | 방향 | 설명 |
-|----|------|------|
-| +X | Up (위) | 로봇에서 멀어지는 방향 |
-| +Y | Left (좌) | TopView 기준 왼쪽 |
-| Z | 0 | 지면 (모든 랜드마크 Z=0) |
-
-### 9.2 사전 계산된 데이터
-
-```json
-"bases": {
-  "left_arm": { "x": -34.8, "y": 227.3, "sources": 1 }
-},
-"vertices": {
-  "1": { "x": 391.0, "y": 154.5, "owner": "left_arm" }
-},
-"distances": {
-  "vertex_to_vertex": { "1_2": 834.7 },
-  "base_to_vertex": { "left_arm": { "1": 432.0 } },
-  "share_point_to_vertex": { "1": 420.4 },
-  "base_to_base": 491.7
-}
-```
-
----
-
-## 10. 슬롯별 역할 요약
-
-| 슬롯 | 역할 | 타입 | 모터 | 범위 | 링크 길이 |
-|------|------|------|------|------|-----------|
-| **S1** | Base Yaw (수평 회전) | horizontal | DS3225 | 180° | 107mm |
-| **S2** | Shoulder (어깨) | vertical | DS3225 | 270° | 105mm |
-| **S3** | Elbow (팔꿈치) | vertical | DS3225 | 270° | 150mm |
-| **S4** | Wrist Pitch (손목) | vertical | DS3225 | 180° | 65mm |
-| **S5** | Roll (롤) | roll | MG996R | 180° | 30mm |
-| **S6** | Gripper (그리퍼) | gripper | MG996R | 180° | 82mm |
-
----
-
-## 11. 핵심 설계 원칙
-
-1. **펄스 우선 (Pulse-First)**: 모든 위치 데이터는 펄스로 저장되고, 각도는 파생값
-2. **독점 소유권 (Exclusive Ownership)**: 각 vertex는 하나의 팔에만 귀속
-3. **사전 계산 (Precomputed)**: FK/IK 결과를 geometry에 저장하여 런타임 계산 최소화
-4. **양팔 일관성 (Dual-Arm Consensus)**: `base_to_base` 거리로 캘리브레이션 검증
-5. **안전 한계 (Safety Limits)**: `min_pulse`/`max_pulse_limit`으로 물리적 충돌 방지
-
----
-
-## 12. 참조 파일 목록
-
-| 파일 | 경로 | 역할 |
-|------|------|------|
-| `servo_config.json` | 루트 | 마스터 설정 |
-| `servo_manager.py` | `tools/robot_calibrator/` | 설정 로드/저장/API |
-| `pulse_mapper.py` | `tools/robot_calibrator/` | 펄스-각도 변환 |
-| `full_slot2_view.py` | `tools/robot_calibrator/ik_tester/tabs/` | Tab 5 구현 |
-| `app.py` | `tools/robot_calibrator/ik_tester/` | 메인 앱 및 get_slot_params() |
+로봇 암은 **COM7** 시리얼 포트를 통해 연결됩니다.

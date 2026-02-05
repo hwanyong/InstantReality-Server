@@ -1,344 +1,307 @@
-# servo_config.json Analysis Report
+# servo_config.json Analysis Document
 
-> **Analysis Target**: `ik_tester_gui.py` last tab (Tab 5: Full Slot) functionality and `servo_config.json` interpretation
-> **Analysis Date**: 2026-02-01
+## 1. Zero Point (0°) Definition
 
-## 1. Overview
-
-`servo_config.json` is the **master configuration file** for the Gemini Robot Control System. It is shared across:
-- Standalone `calibrator_gui.py`
-- `ik_tester_gui.py` (Inverse Kinematics Tester)
-- Main Gemini Server
+**0 degrees represents the posture where the arm is extended horizontally toward the table (scene).**
 
 ---
 
-## 2. File Structure
-
-### 2.1 Top-Level Structure
+## 2. File Structure Overview
 
 ```json
 {
-  "left_arm": { "slot_1": {...}, "slot_2": {...}, ... "slot_6": {...} },
-  "right_arm": { "slot_1": {...}, "slot_2": {...}, ... "slot_6": {...} },
-  "connection": { "port": "COM7" },
-  "vertices": { "1": {...}, "2": {...}, ... "8": {...} },
-  "share_points": { "left_arm": {...}, "right_arm": {...} },
-  "geometry": { ... }
-}
-```
-
-| Section | Description |
-|---------|-------------|
-| `left_arm`, `right_arm` | 6 slot (joint) configurations per arm |
-| `connection` | Serial port connection info (desktop tools) |
-| `vertices` | 8 workspace vertices (calibration points) |
-| `share_points` | Central point shared by both arms |
-| `geometry` | Precomputed 3D coordinates and distances |
-
----
-
-## 3. Slot (Joint) Property Analysis
-
-### 3.1 Hardware Identification Properties
-
-| Property | Type | Description | Example |
-|----------|------|-------------|---------|
-| `channel` | int | PCA9685 I2C channel (0-15) | `0`, `7` |
-| `device_name` | string | Motor model name | `"DS3225"`, `"MG996R"` |
-| `type` | string | Kinematic role | `"horizontal"`, `"vertical"`, `"roll"`, `"gripper"` |
-| `actuation_range` | int | Physical rotation range (degrees) | `180`, `270` |
-| `length` | float | Link length to next joint (mm) | `107.0`, `150.0` |
-| `min_pos` | string | Minimum position direction indicator | `"right"`, `"top"`, `"bottom"`, `"ccw"`, `"open"` |
-
-### 3.2 Pulse-Based Properties (Master Truth)
-
-> [!IMPORTANT]
-> **Core Principle**: The system treats **Pulse Width (µs)** as the **Master Source of Truth**.
-> All angle values are derived from pulses.
-
-| Property | Type | Description |
-|----------|------|-------------|
-| `pulse_min` | int | PWM pulse at 0° reference |
-| `pulse_max` | int | Theoretical pulse at hardware maximum |
-| `min_pulse` | int | **Software safety limit** (minimum) |
-| `max_pulse_limit` | int | **Software safety limit** (maximum) |
-| `zero_pulse` | int | Pulse at "Zero" (vertical pose) position |
-| `initial_pulse` | int | Pulse at "Home" (retracted pose) position |
-
-### 3.3 Derived Angle Properties (View Projection)
-
-| Property | Type | Description |
-|----------|------|-------------|
-| `initial` | float | Physical angle at Home position (°) |
-| `zero_offset` | float | Offset angle from 0° reference (°) |
-| `min` | float | Physical minimum limit (°) |
-| `max` | float | Physical maximum limit (°) |
-
----
-
-## 4. Full Slot Tab (Tab 5) Functional Analysis
-
-### 4.1 UI Layout
-
-```
-┌─────────────────┬─────────────────┬─────────────┐
-│  Top-Down View  │   Side View     │  Gripper    │
-│   (X/Y Input)   │  (IK: R,Z→θ2,θ3)│   State     │
-│                 │                 │             │
-│  • Y Slider     │  • Z Slider     │  • Gripper  │
-│  • X Slider     │  • S2-S6 Status │    Visual   │
-│  • θ1 Auto-calc │  • θ4 Approach  │             │
-└─────────────────┴─────────────────┴─────────────┘
-```
-
-### 4.2 Configuration Loading Workflow
-
-```python
-# Configuration loading in _refresh_config()
-p1 = self.context.get_slot_params(1)  # Slot 1 parameters
-p2 = self.context.get_slot_params(2)  # Slot 2 parameters
-# ... p3 ~ p6
-
-# Pass link lengths to Side View Widget
-self.side_widget.cfg['d1'] = p1.get('length', 107.0)  # Base height
-self.side_widget.cfg['a2'] = p2.get('length', 105.0)  # Upper arm
-self.side_widget.cfg['a3'] = p3.get('length', 150.0)  # Forearm
-self.side_widget.cfg['a4'] = p4.get('length', 65.0)   # Wrist
-```
-
-### 4.3 get_slot_params() Return Structure
-
-```python
-{
-    'channel': 0,           # PCA9685 channel
-    'zero_offset': 137.6,   # Zero position offset
-    'min': 107.3,           # Physical minimum limit
-    'max': 270.0,           # Physical maximum limit
-    'actuation_range': 270, # Motor rotation range
-    'type': 'vertical',     # Motion type
-    'min_pos': 'bottom',    # Minimum position direction
-    'polarity': 1,          # Polarity (+1 or -1)
-    'math_min': -30.0,      # Mathematical minimum (for IK)
-    'math_max': 132.4,      # Mathematical maximum (for IK)
-    'motor_config': {       # For PulseMapper
-        'actuation_range': 270,
-        'pulse_min': 500,
-        'pulse_max': 2500
-    },
-    'length': 105.0         # Link length (mm)
+  "right_arm": { "slot_1" ~ "slot_6" },
+  "left_arm":  { "slot_1" ~ "slot_6" },
+  "connection": { "port": "COM7" }
 }
 ```
 
 ---
 
-## 5. Polarity Rules
+## 3. Parameter Definitions (Complete)
 
-### 5.1 Polarity Determination Logic
-
-```python
-polarity = 1
-
-# Horizontal type: left → -1
-if typ == "horizontal" and min_pos == "left":
-    polarity = -1
-
-# Vertical type: top → -1, bottom → 1
-if typ == "vertical":
-    polarity = -1 if min_pos == "top" else 1
-```
-
-### 5.2 Mathematical Range Calculation
-
-```python
-# Convert physical limits to mathematical frame
-bound_a = (limits["min"] - zero_offset) * polarity
-bound_b = (limits["max"] - zero_offset) * polarity
-
-math_min = min(bound_a, bound_b)
-math_max = max(bound_a, bound_b)
-```
+| Parameter | Type | Description |
+|---|---|---|
+| `channel` | int | PCA9685 PWM board channel number (0~15) |
+| `min` | float | Software-allowed minimum angle |
+| `max` | float | Software-allowed maximum angle |
+| `type` | string | Joint type (`horizontal`, `roll`, `gripper`, or omitted for vertical joints) |
+| `min_pos` | string | **Physical position at minimum angle (min)** → Determines motion polarity |
+| `initial` | float | Initial angle to move to at startup (°) |
+| `length` | float | Physical length of the link (mm) - for IK calculations |
+| `zero_offset` | float | **Raw servo angle corresponding to zero point (0°)** |
+| `actuation_range` | int | Servo's physical actuation range (180° or 270°) |
+| `pulse_min` | int | Servo spec minimum pulse (μs) |
+| `pulse_max` | int | Servo spec maximum pulse (μs) |
+| `device_name` | string | Servo model name (DS3225, MG996R, etc.) |
+| `initial_pulse` | int | Actual pulse value to output at startup (μs) |
+| `zero_pulse` | int | **Pulse value corresponding to 0° posture** (μs) - Core calibration value |
+| `min_pulse` | int | Software-allowed minimum pulse (safety limit) |
+| `max_pulse_limit` | int | Software-allowed maximum pulse (safety limit) |
 
 ---
 
-## 6. Pulse-Angle Conversion (PulseMapper)
+## 4. Right Arm Detailed Slot Analysis
 
-### 6.1 Physical Angle → Pulse Conversion
+### Slot 1 - Base Rotation (Base Yaw)
 
-```python
-def physical_to_pulse(target_physical_deg, motor_config):
-    actuation_range = motor_config.get("actuation_range", 180)
-    pulse_min = motor_config.get("pulse_min", 500)
-    pulse_max = motor_config.get("pulse_max", 2500)
-    
-    # Calculate ratio
-    ratio = target_physical_deg / actuation_range
-    pulse_us = pulse_min + (ratio * (pulse_max - pulse_min))
-    
-    return int(pulse_us)
-```
+| Property | Value | Meaning |
+|---|---|---|
+| `channel` | 0 | PWM Channel 0 |
+| `type` | `horizontal` | Horizontal plane rotation |
+| `min_pos` | `right` | min(0°) → Right side |
+| `min` → `max` | 0° → 180° | Right → Left rotation |
+| `zero_offset` | 2.7° | Forward (horizontal extend) = Servo 2.7° |
+| `length` | 107mm | Shoulder height/base offset |
+| `actuation_range` | 180° | 180-degree servo |
+| `zero_pulse` | 530μs | 0° position pulse |
+| `device_name` | DS3225 | Servo model |
 
-### 6.2 Example: DS3225 (270° Motor)
-
-| Physical Angle | Ratio | Pulse (µs) |
-|----------------|-------|------------|
-| 0° | 0.0 | 500 |
-| 90° | 0.333 | 1166 |
-| 135° | 0.5 | 1500 |
-| 270° | 1.0 | 2500 |
+**Motion Direction**: Angle increase → **Counter-Clockwise (CCW) / Left**
 
 ---
 
-## 7. IK Calculation Flow (update_visualization)
+### Slot 2 - Shoulder (Shoulder Pitch)
 
-### 7.1 Step 1: θ1 Calculation (Base Yaw)
+| Property | Value | Meaning |
+|---|---|---|
+| `channel` | 1 | PWM Channel 1 |
+| `type` | (none) | Vertical joint |
+| `min_pos` | `bottom` | min(86.7°) → Downward direction |
+| `min` → `max` | 86.7° → 270° | Physical range of motion |
+| `zero_offset` | 126° | Forward horizontal = Servo 126° |
+| `actuation_range` | 270° | 270-degree servo |
+| `length` | 105mm | Upper arm length |
+| `zero_pulse` | 1433μs | 0° position pulse |
+| `device_name` | DS3225 | Servo model |
 
-```python
-# X, Y input from Top-Down View
-theta1 = math.degrees(math.atan2(y, x))
-R = math.sqrt(x**2 + y**2)  # Horizontal distance
-```
+**Motion Direction**: Angle increase → **Down** / Angle decrease → **Up**
 
-### 7.2 Step 2: θ2, θ3 Calculation (2-Link IK)
-
-```python
-# Calculate wrist Z height (gripper pointing down at -90°)
-wrist_z = z + a4 + a6
-
-# 2-Link IK solution
-theta2, theta3, is_reachable, config_name = _solve_2link_ik(R, wrist_z, d1, a2, a3)
-
-# Invert θ3 for Slot 3 (min_pos: top)
-theta3 = -theta3
-```
-
-### 7.3 Step 3: θ4 Calculation (Approach Angle)
-
-```python
-# Keep gripper perpendicular to ground
-theta4 = -90.0 - theta2 + theta3
-```
-
-### 7.4 Step 4: Physical Angle Conversion
-
-Different conversion rules per slot:
-
-| Slot | Conversion Formula | Description |
-|------|--------------------|-------------|
-| S1 | `phy = theta + zero_offset` | Simple offset |
-| S2 | `phy = theta + zero_offset` | Shoulder |
-| S3 | `phy = zero_offset + theta` | Elbow (after inversion) |
-| S4 | `phy = zero_offset - theta` | Wrist (top → inverted) |
-| S5 | `phy = theta + zero_offset` | Roll (manual input) |
-| S6 | `phy = theta + zero_offset` | Gripper (manual input) |
+> ⚠️ Since `min_pos: bottom`, decreasing the software angle moves the arm **upward**.
 
 ---
 
-## 8. Vertices & Share Points Structure
+### Slot 3 - Elbow (Elbow Pitch)
 
-### 8.1 Vertex (Workspace Vertices)
+| Property | Value | Meaning |
+|---|---|---|
+| `channel` | 2 | PWM Channel 2 |
+| `type` | (none) | Vertical joint |
+| `min_pos` | `top` | min(0°) → Upward direction (folded) |
+| `min` → `max` | 0° → 259.9° | Folded → Extended |
+| `zero_offset` | 108.7° | Forward horizontal = Servo 108.7° |
+| `actuation_range` | 270° | 270-degree servo |
+| `length` | 150mm | Forearm length |
+| `zero_pulse` | 1305μs | 0° position pulse |
+| `device_name` | DS3225 | Servo model |
+
+**Motion Direction**: Angle increase → **Elbow Extension**
+
+---
+
+### Slot 4 - Wrist Horizontal Rotation (Wrist Yaw)
+
+| Property | Value | Meaning |
+|---|---|---|
+| `channel` | 3 | PWM Channel 3 |
+| `type` | `horizontal` | Horizontal plane rotation |
+| `min_pos` | `left` | min(0°) → Left side |
+| `min` → `max` | 0° → 180° | Left → Right |
+| `zero_offset` | 110° | Neutral (straight) = Servo 110° |
+| `length` | 65mm | Wrist offset |
+| `zero_pulse` | 1722μs | 0° position pulse |
+| `device_name` | DS3225 | Servo model |
+
+**Motion Direction**: Angle increase → **Clockwise (CW) / Right**
+
+---
+
+### Slot 5 - Wrist Roll
+
+| Property | Value | Meaning |
+|---|---|---|
+| `channel` | 4 | PWM Channel 4 |
+| `type` | `roll` | Roll rotation |
+| `min_pos` | `ccw` | min(0°) → Counter-clockwise direction |
+| `min` → `max` | 0° → 180° | CCW → CW |
+| `zero_offset` | 85° | Neutral = Servo 85° |
+| `length` | 30mm | Wrist roll segment |
+| `zero_pulse` | 1444μs | 0° position pulse |
+| `device_name` | MG996R | Servo model |
+
+**Motion Direction**: Angle increase → **Clockwise Roll (CW Roll)**
+
+---
+
+### Slot 6 - Gripper
+
+| Property | Value | Meaning |
+|---|---|---|
+| `channel` | 5 | PWM Channel 5 |
+| `type` | `gripper` | Gripper |
+| `min_pos` | `open` | min(0°) → Fully open |
+| `min` → `max` | 0° → 55.7° | Open → Closed |
+| `zero_offset` | 0° | Open state = 0° |
+| `length` | 70mm | Gripper length |
+| `zero_pulse` | 500μs | 0° position pulse |
+| `device_name` | MG996R | Servo model |
+
+**Motion Direction**: Angle increase → **Close**
+
+---
+
+## 5. Left Arm Detailed Slot Analysis
+
+### Slot 1 - Base Rotation (Base Yaw)
+
+| Property | Value | Meaning |
+|---|---|---|
+| `channel` | 6 | PWM Channel 6 |
+| `type` | `horizontal` | Horizontal plane rotation |
+| `min_pos` | `right` | min(0°) → Right side |
+| `min` → `max` | 0° → 180° | Right → Left rotation |
+| `zero_offset` | 171° | Forward horizontal = Servo 171° |
+| `length` | 107mm | Shoulder height/base offset |
+| `zero_pulse` | 2400μs | 0° position pulse |
+| `device_name` | DS3225 | Servo model |
+
+---
+
+### Slot 2 - Shoulder (Shoulder Pitch)
+
+| Property | Value | Meaning |
+|---|---|---|
+| `channel` | 7 | PWM Channel 7 |
+| `min_pos` | `bottom` | min(107.6°) → Downward direction |
+| `min` → `max` | 107.6° → 270° | Physical range of motion |
+| `zero_offset` | 139.1° | Forward horizontal = Servo 139.1° |
+| `actuation_range` | 270° | 270-degree servo |
+| `length` | 105mm | Upper arm length |
+| `zero_pulse` | 1530μs | 0° position pulse |
+| `device_name` | DS3225 | Servo model |
+
+---
+
+### Slot 3 - Elbow (Elbow Pitch)
+
+| Property | Value | Meaning |
+|---|---|---|
+| `channel` | 8 | PWM Channel 8 |
+| `min_pos` | `top` | min(0°) → Upward direction |
+| `min` → `max` | 0° → 270° | Folded → Extended |
+| `zero_offset` | 121° | Forward horizontal = Servo 121° |
+| `actuation_range` | 270° | 270-degree servo |
+| `length` | 150mm | Forearm length |
+| `zero_pulse` | 1396μs | 0° position pulse |
+| `device_name` | DS3225 | Servo model |
+
+---
+
+### Slot 4 - Wrist Horizontal Rotation (Wrist Yaw)
+
+| Property | Value | Meaning |
+|---|---|---|
+| `channel` | 9 | PWM Channel 9 |
+| `type` | `horizontal` | Horizontal plane rotation |
+| `min_pos` | `left` | min(0°) → Left side |
+| `min` → `max` | 0° → 180° | Left → Right |
+| `zero_offset` | 91.2° | Neutral = Servo 91.2° |
+| `length` | 65mm | Wrist offset |
+| `zero_pulse` | 1513μs | 0° position pulse |
+| `device_name` | DS3225 | Servo model |
+
+---
+
+### Slot 5 - Wrist Roll
+
+| Property | Value | Meaning |
+|---|---|---|
+| `channel` | 10 | PWM Channel 10 |
+| `type` | `roll` | Roll rotation |
+| `min_pos` | `ccw` | min(0°) → Counter-clockwise direction |
+| `min` → `max` | 0° → 180° | CCW → CW |
+| `zero_offset` | 90° | Neutral = Servo 90° |
+| `length` | 30mm | Wrist roll segment |
+| `zero_pulse` | 1500μs | 0° position pulse |
+| `device_name` | MG996R | Servo model |
+
+---
+
+### Slot 6 - Gripper
+
+| Property | Value | Meaning |
+|---|---|---|
+| `channel` | 11 | PWM Channel 11 |
+| `type` | `gripper` | Gripper |
+| `min_pos` | `open` | min(126.4°) → Open |
+| `min` → `max` | 126.4° → 180° | Open → Closed |
+| `zero_offset` | 126.4° | Open state = 126.4° |
+| `length` | 70mm | Gripper length |
+| `zero_pulse` | 1904μs | 0° position pulse |
+| `device_name` | MG996R | Servo model |
+
+---
+
+## 6. Motion Polarity Summary
+
+### Right Arm
+
+| Slot | Joint | `min_pos` | Motion Direction on Angle Increase |
+|---|---|---|---|
+| 1 | Base Yaw | `right` | → **Left (CCW)** |
+| 2 | Shoulder | `bottom` | → **Down** |
+| 3 | Elbow | `top` | → **Extension** |
+| 4 | Wrist Yaw | `left` | → **Right (CW)** |
+| 5 | Wrist Roll | `ccw` | → **CW Roll** |
+| 6 | Gripper | `open` | → **Close** |
+
+### Left Arm
+
+| Slot | Joint | `min_pos` | Motion Direction on Angle Increase |
+|---|---|---|---|
+| 1 | Base Yaw | `right` | → **Left (CCW)** |
+| 2 | Shoulder | `bottom` | → **Down** |
+| 3 | Elbow | `top` | → **Extension** |
+| 4 | Wrist Yaw | `left` | → **Right (CW)** |
+| 5 | Wrist Roll | `ccw` | → **CW Roll** |
+| 6 | Gripper | `open` | → **Close** |
+
+---
+
+## 7. Core Calibration Formula
+
+```
+pulse = zero_pulse + (software_angle × pulse_per_degree × polarity)
+```
+
+Components:
+- **`zero_pulse`**: Reference pulse for 0° posture
+- **`polarity`**: +1 or -1 depending on `min_pos`
+- **`pulse_per_degree`**: `(pulse_max - pulse_min) / actuation_range`
+
+---
+
+## 8. Left Arm vs Right Arm Key Differences
+
+Left Arm is structurally **mirrored** from Right Arm:
+
+| Property | Right Arm | Left Arm |
+|---|---|---|
+| Slot 1 `initial` | 0° | 171° (facing opposite side) |
+| Slot 1 `zero_offset` | 2.7° | 171° |
+| Slot 2 `zero_offset` | 126° | 139.1° |
+| Slot 3 `zero_offset` | 108.7° | 121° |
+| Slot 4 `zero_offset` | 110° | 91.2° |
+| Slot 6 `min` | 0° | 126.4° (gripper direction inverted) |
+
+---
+
+## 9. Connection Settings
 
 ```json
-"vertices": {
-  "1": {
-    "owner": "left_arm",
-    "pulses": {
-      "slot_1": 2459,
-      "slot_2": 1803,
-      "slot_3": 1666,
-      "slot_4": 1918,
-      "slot_5": 580,
-      "slot_6": 2720
-    },
-    "angles": {
-      "slot_1": 170.3,
-      "slot_2": 175.9,
-      "slot_3": 157.4,
-      "slot_4": 127.6,
-      "slot_5": 7.2,
-      "slot_6": 180
-    }
-  }
+"connection": {
+  "port": "COM7"
 }
 ```
 
-### 8.2 Share Point (Shared Center Point)
-
-```json
-"share_points": {
-  "left_arm": {
-    "pulses": { "slot_1": 1664, ... },
-    "angles": { "slot_1": 98.7, ... }
-  }
-}
-```
-
----
-
-## 9. Geometry Block
-
-### 9.1 Coordinate System Definition
-
-```json
-"geometry": {
-  "coordinate_system": "+X=up, +Y=left",
-  "origin": "share_point"
-}
-```
-
-| Axis | Direction | Description |
-|------|-----------|-------------|
-| +X | Up | Away from robot base |
-| +Y | Left | Left side in TopView |
-| Z | 0 | Ground level (all landmarks at Z=0) |
-
-### 9.2 Precomputed Data
-
-```json
-"bases": {
-  "left_arm": { "x": -34.8, "y": 227.3, "sources": 1 }
-},
-"vertices": {
-  "1": { "x": 391.0, "y": 154.5, "owner": "left_arm" }
-},
-"distances": {
-  "vertex_to_vertex": { "1_2": 834.7 },
-  "base_to_vertex": { "left_arm": { "1": 432.0 } },
-  "share_point_to_vertex": { "1": 420.4 },
-  "base_to_base": 491.7
-}
-```
-
----
-
-## 10. Slot-by-Slot Role Summary
-
-| Slot | Role | Type | Motor | Range | Link Length |
-|------|------|------|-------|-------|-------------|
-| **S1** | Base Yaw (horizontal rotation) | horizontal | DS3225 | 180° | 107mm |
-| **S2** | Shoulder | vertical | DS3225 | 270° | 105mm |
-| **S3** | Elbow | vertical | DS3225 | 270° | 150mm |
-| **S4** | Wrist Pitch | vertical | DS3225 | 180° | 65mm |
-| **S5** | Roll | roll | MG996R | 180° | 30mm |
-| **S6** | Gripper | gripper | MG996R | 180° | 82mm |
-
----
-
-## 11. Core Design Principles
-
-1. **Pulse-First**: All position data stored as pulses; angles are derived values
-2. **Exclusive Ownership**: Each vertex belongs to only one arm
-3. **Precomputed**: FK/IK results stored in geometry to minimize runtime calculations
-4. **Dual-Arm Consensus**: `base_to_base` distance validates calibration
-5. **Safety Limits**: `min_pulse`/`max_pulse_limit` prevent physical collisions
-
----
-
-## 12. Reference File List
-
-| File | Path | Role |
-|------|------|------|
-| `servo_config.json` | Root | Master configuration |
-| `servo_manager.py` | `tools/robot_calibrator/` | Config load/save/API |
-| `pulse_mapper.py` | `tools/robot_calibrator/` | Pulse-angle conversion |
-| `full_slot2_view.py` | `tools/robot_calibrator/ik_tester/tabs/` | Tab 5 implementation |
-| `app.py` | `tools/robot_calibrator/ik_tester/` | Main app & get_slot_params() |
+The robot arm is connected via **COM7** serial port.

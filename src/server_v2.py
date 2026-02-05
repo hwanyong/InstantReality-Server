@@ -29,6 +29,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.camera_manager import get_camera, get_active_cameras, init_cameras, set_camera_focus, set_camera_exposure, set_camera_auto_exposure
 from src.camera_mapping import get_index_by_role, get_available_devices, match_roles, assign_role, VALID_ROLES, save_camera_settings, get_all_settings, get_roi_config, save_roi_config
+from src.calibration_manager import get_calibration_for_role, save_calibration_for_role
 from src.ai_engine import GeminiBrain
 import robot_api
 
@@ -488,6 +489,49 @@ async def handle_calibration_geometry(request):
     except Exception as e:
         return web.json_response({"error": str(e)}, status=500)
 
+
+async def handle_calibration_data_get(request):
+    """GET /api/calibration/{role} - Get calibration data for a specific role
+    
+    Returns pixel coordinates, homography matrix, and metadata.
+    """
+    role = request.match_info.get('role', 'TopView')
+    
+    calibration = get_calibration_for_role(role)
+    if calibration is None:
+        return web.json_response({"error": f"No calibration data for {role}"}, status=404)
+    
+    return web.json_response(calibration)
+
+
+async def handle_calibration_data_save(request):
+    """POST /api/calibration - Save calibration data for a role
+    
+    Request body:
+    {
+        "role": "TopView",
+        "calibration": {
+            "timestamp": "2026-02-05T00:00:00Z",
+            "resolution": {"width": 1920, "height": 1080},
+            "homography_matrix": [[...], [...], [...]],
+            "pixel_coords": {...},
+            "reprojection_error": 0.0023,
+            "is_valid": true
+        }
+    }
+    """
+    data = await request.json()
+    role = data.get("role", "TopView")
+    calibration = data.get("calibration")
+    
+    if not calibration:
+        return web.json_response({"error": "calibration data required"}, status=400)
+    
+    result = save_calibration_for_role(role, calibration)
+    logger.info(f"Calibration data saved for {role}")
+    
+    return web.json_response({"success": True, "role": role, "calibration": result})
+
 # =============================================================================
 # WebRTC Handlers
 # =============================================================================
@@ -819,6 +863,8 @@ def create_app():
         web.post('/api/servo_config', handle_servo_config_save),
         # Calibration API
         web.get('/api/calibration/geometry', handle_calibration_geometry),
+        web.get('/api/calibration/{role}', handle_calibration_data_get),
+        web.post('/api/calibration', handle_calibration_data_save),
     ]
     
     for route in api_routes:

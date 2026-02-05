@@ -800,7 +800,11 @@ async function runCalibration() {
 
     // 10. Mark as calibrated and render
     overlayState.isCalibrated = true
+    overlayState.reprojectionError = error
     renderOverlay()
+
+    // 11. Auto-save calibration data
+    await saveCalibration()
 
     showSuccess('캘리브레이션(Homography) 완료!')
     console.log('Calibration results:', {
@@ -811,6 +815,98 @@ async function runCalibration() {
     })
 }
 
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Calibration Data Persistence
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function saveCalibration() {
+    const video = elements.cameras[0]
+    if (!video) return
+
+    const calibration = {
+        timestamp: new Date().toISOString(),
+        resolution: {
+            width: video.videoWidth || 1920,
+            height: video.videoHeight || 1080
+        },
+        homography_matrix: overlayState.homographyMatrix,
+        pixel_coords: {
+            vertices: overlayState.vertices.reduce((acc, v, i) => {
+                acc[String(i + 1)] = { x: v.x, y: v.y }
+                return acc
+            }, {}),
+            share_point: overlayState.sharePoint,
+            bases: {
+                left_arm: overlayState.leftBase,
+                right_arm: overlayState.rightBase
+            }
+        },
+        reprojection_error: overlayState.reprojectionError || 0,
+        is_valid: overlayState.isCalibrated
+    }
+
+    try {
+        const res = await fetch(`${API_BASE}/api/calibration`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ role: 'TopView', calibration })
+        })
+        if (!res.ok) throw new Error(`Save failed: ${res.status}`)
+        console.log('Calibration data auto-saved')
+    } catch (e) {
+        console.error('Failed to save calibration:', e)
+        showError(`캘리브레이션 저장 실패: ${e.message}`)
+    }
+}
+
+async function loadCalibration() {
+    try {
+        const res = await fetch(`${API_BASE}/api/calibration/TopView`)
+        if (!res.ok) {
+            if (res.status == 404) {
+                console.log('No saved calibration data found')
+                return false
+            }
+            throw new Error(`Load failed: ${res.status}`)
+        }
+
+        const cal = await res.json()
+        const video = elements.cameras[0]
+
+        // Resolution mismatch warning
+        if (video && video.videoWidth && cal.resolution) {
+            if (cal.resolution.width != video.videoWidth ||
+                cal.resolution.height != video.videoHeight) {
+                showToast(`해상도 변경됨 (${cal.resolution.width}x${cal.resolution.height} → ${video.videoWidth}x${video.videoHeight}). 재캘리브레이션 권장`, 'warning')
+            }
+        }
+
+        // Restore state
+        if (cal.pixel_coords) {
+            const verts = cal.pixel_coords.vertices
+            overlayState.vertices = ['1', '2', '3', '4']
+                .filter(k => verts[k])
+                .map(k => ({ x: verts[k].x, y: verts[k].y }))
+
+            overlayState.sharePoint = cal.pixel_coords.share_point
+            overlayState.leftBase = cal.pixel_coords.bases?.left_arm
+            overlayState.rightBase = cal.pixel_coords.bases?.right_arm
+        }
+
+        overlayState.homographyMatrix = cal.homography_matrix
+        overlayState.reprojectionError = cal.reprojection_error
+        overlayState.isCalibrated = cal.is_valid
+
+        renderOverlay()
+        console.log('Calibration data restored from server')
+        showSuccess('저장된 캘리브레이션 복원 완료')
+        return true
+    } catch (e) {
+        console.error('Failed to load calibration:', e)
+        return false
+    }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Event Listeners
@@ -917,6 +1013,11 @@ async function init() {
     try {
         await initWebRTC()
         console.log('Calibration page ready')
+
+        // Auto-restore calibration data (after video is ready)
+        setTimeout(async () => {
+            await loadCalibration()
+        }, 500)
     } catch (e) {
         console.error('Failed to initialize WebRTC:', e)
         showError(`WebRTC 초기화 실패: ${e.message}`)
