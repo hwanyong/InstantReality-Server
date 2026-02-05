@@ -5,7 +5,7 @@
 
 import InstantReality from '/sdk/instant-reality.mjs'
 import { showToast, showSuccess, showError } from './lib/toast.mjs'
-import { computeHomography, applyHomography, isValidHomography, computeReprojectionError } from './transform.mjs'
+import { computeHomography, applyHomography, isValidHomography, computeReprojectionError, pixelToRobot } from './transform.mjs'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Globals
@@ -25,14 +25,6 @@ const elements = {
         document.getElementById('camera-2'),
         document.getElementById('camera-3')
     ],
-    // Robot Control
-    robotStatus: document.getElementById('robot-status'),
-    robotConnectBtn: document.getElementById('robot-connect-btn'),
-    robotDisconnectBtn: document.getElementById('robot-disconnect-btn'),
-    goHomeBtn: document.getElementById('go-home-btn'),
-    goZeroBtn: document.getElementById('go-zero-btn'),
-    motionSpeed: document.getElementById('motion-speed'),
-    speedValue: document.getElementById('speed-value'),
 
     // JSON preview
     jsonPreview: document.getElementById('json-preview'),
@@ -172,85 +164,6 @@ function initPauseButtons() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Robot Control
-// ─────────────────────────────────────────────────────────────────────────────
-
-async function connectRobot() {
-    elements.robotStatus.textContent = 'Connecting...'
-    try {
-        const res = await fetch(`${API_BASE}/api/robot/connect`, { method: 'POST' })
-        const data = await res.json()
-        if (data.success) {
-            elements.robotStatus.textContent = 'Connected'
-            elements.robotStatus.style.color = 'var(--success)'
-            elements.robotConnectBtn.disabled = true
-            elements.robotDisconnectBtn.disabled = false
-            elements.goHomeBtn.disabled = false
-            elements.goZeroBtn.disabled = false
-            showSuccess('로봇 연결됨')
-        } else {
-            throw new Error(data.error || 'Connection failed')
-        }
-    } catch (e) {
-        elements.robotStatus.textContent = 'Disconnected'
-        elements.robotStatus.style.color = 'var(--danger)'
-        showError(`로봇 연결 실패: ${e.message}`)
-    }
-}
-
-async function disconnectRobot() {
-    try {
-        await fetch(`${API_BASE}/api/robot/disconnect`, { method: 'POST' })
-        elements.robotStatus.textContent = 'Disconnected'
-        elements.robotStatus.style.color = 'var(--text-secondary)'
-        elements.robotConnectBtn.disabled = false
-        elements.robotDisconnectBtn.disabled = true
-        elements.goHomeBtn.disabled = true
-        elements.goZeroBtn.disabled = true
-        showToast('로봇 연결 해제됨')
-    } catch (e) {
-        showError(`연결 해제 실패: ${e.message}`)
-    }
-}
-
-async function goHome() {
-    const speed = parseFloat(elements.motionSpeed.value)
-    showToast(`홈 포지션으로 이동... (${speed}초)`)
-    try {
-        const res = await fetch(`${API_BASE}/api/robot/home`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ motion_time: speed })
-        })
-        const data = await res.json()
-        if (data.success) {
-            showSuccess('홈 포지션 이동 완료')
-        }
-    } catch (e) {
-        showError(`이동 실패: ${e.message}`)
-    }
-}
-
-async function goZero() {
-    const speed = parseFloat(elements.motionSpeed.value)
-    showToast(`제로 포지션으로 이동... (${speed}초)`)
-    try {
-        const res = await fetch(`${API_BASE}/api/robot/zero`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ motion_time: speed })
-        })
-        const data = await res.json()
-        if (data.success) {
-            showSuccess('제로 포지션 이동 완료')
-        }
-    } catch (e) {
-        showError(`이동 실패: ${e.message}`)
-    }
-}
-
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Detection
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -332,6 +245,34 @@ const overlayState = {
     homographyMatrix: null,  // 3x3 matrix
     isCalibrated: false,
     robotGeometry: null,     // cached geometry from server
+    // Test mode state
+    testModeActive: false,   // when true, clicks move robot
+}
+
+// Test Mode Constants
+const DEFAULT_Z = 5       // mm - height above ground
+const DEFAULT_SPEED = 2   // seconds
+
+// Calculate IK using server API (Single Source of Truth)
+// Server handles: World→Local conversion, Reach, θ1~θ4
+async function calculateIK(worldX, worldY, arm) {
+    try {
+        const res = await fetch(`${API_BASE}/api/ik/calculate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ world_x: worldX, world_y: worldY, z: 3, arm })
+        })
+
+        if (!res.ok) {
+            console.error('IK API error:', res.status)
+            return null
+        }
+
+        return await res.json()
+    } catch (err) {
+        console.error('IK API fetch error:', err)
+        return null
+    }
 }
 
 const SVG_NS = 'http://www.w3.org/2000/svg'
@@ -531,13 +472,19 @@ function renderOverlay() {
 
 // Handle SVG background click (add vertex only - base/share are auto-calculated)
 function handleSVGClick(e) {
-    // Ignore if clicking on existing element
-    if (e.target.closest('.vertex') || e.target.closest('.marker') || e.target.closest('.delete-btn')) {
+    // Ignore if clicking on existing element (including test markers)
+    if (e.target.closest('.vertex') || e.target.closest('.marker') || e.target.closest('.delete-btn') || e.target.closest('.test-marker')) {
         return
     }
 
     const coords = getSVGCoordinates(e)
     if (!coords) return
+
+    // Test mode: click to add point marker
+    if (overlayState.testModeActive && overlayState.isCalibrated && overlayState.homographyMatrix) {
+        addTestPointAtPixel(coords)
+        return
+    }
 
     // Only vertex tool is interactive
     if (overlayState.tool == 'vertex') {
@@ -808,6 +755,9 @@ async function runCalibration() {
     // 11. Auto-save calibration data
     await saveCalibration()
 
+    // 12. Enable test mode button
+    enableTestModeButton()
+
     showSuccess('캘리브레이션(Homography) 완료!')
     console.log('Calibration results:', {
         leftBase: overlayState.leftBase,
@@ -817,6 +767,317 @@ async function runCalibration() {
     })
 }
 
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Test Mode - Move Robot to Clicked Position
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Add test point marker (converts pixel to robot coords via inverse homography)
+function addTestPointAtPixel(pixelCoord) {
+    if (!overlayState.homographyMatrix) {
+        showError('캘리브레이션이 필요합니다')
+        return
+    }
+
+    try {
+        // Convert pixel to robot coordinates
+        const robotCoord = pixelToRobot(overlayState.homographyMatrix, pixelCoord)
+
+        // Y-axis inversion: screen Y-down, robot Y-up
+        const x = robotCoord.x
+        const y = -robotCoord.y
+
+        // Determine which arm would handle this position
+        const arm = x < 0 ? 'left_arm' : 'right_arm'
+
+        // Add visual marker with tooltip
+        addTestMarker(pixelCoord, { x: x, y: y, arm: arm })
+
+        showToast(`📍 #${testMarkers.length}: (${x.toFixed(0)}, ${y.toFixed(0)}) mm - ${arm == 'left_arm' ? '왼팔' : '오른팔'}`)
+    } catch (e) {
+        showError(`좌표 변환 실패: ${e.message}`)
+    }
+}
+
+// Toggle test mode on/off
+function toggleTestMode() {
+    overlayState.testModeActive = !overlayState.testModeActive
+
+    const btn = document.getElementById('test-mode-btn')
+    const vertexBtn = document.getElementById('tool-vertex')
+
+    if (btn) {
+        btn.classList.toggle('active', overlayState.testModeActive)
+        btn.style.background = overlayState.testModeActive ? '#f59e0b' : ''
+        btn.style.color = overlayState.testModeActive ? '#000' : ''
+    }
+
+    // Disable vertex tool when test mode is active
+    if (vertexBtn) {
+        vertexBtn.disabled = overlayState.testModeActive
+        vertexBtn.style.opacity = overlayState.testModeActive ? '0.5' : ''
+    }
+
+    if (overlayState.testModeActive) {
+        // Clear previous markers when re-entering test mode
+        clearTestMarkers()
+        showToast('🎯 테스트 모드 활성화 - 클릭하여 포인트 등록')
+    } else {
+        showToast('테스트 모드 비활성화')
+        // Clear test markers when exiting test mode
+        clearTestMarkers()
+    }
+}
+
+// Setup test mode button
+function setupTestModeButton() {
+    const btn = document.getElementById('test-mode-btn')
+    if (!btn) return
+
+    btn.addEventListener('click', toggleTestMode)
+}
+
+// Enable test mode button (called after calibration completes)
+function enableTestModeButton() {
+    const btn = document.getElementById('test-mode-btn')
+    if (btn) {
+        btn.disabled = false
+        btn.title = '클릭하여 테스트 모드 활성화'
+    }
+}
+
+// Test markers storage (Single Source of Truth)
+const testMarkers = []
+
+// Add test marker data (data only, then render)
+async function addTestMarker(pixelCoords, robotCoords) {
+    const markerIndex = testMarkers.length + 1
+
+    // Get ALL data from server (Single Source of Truth)
+    const res = await calculateIK(robotCoords.x, robotCoords.y, robotCoords.arm)
+
+    if (!res || !res.success) {
+        console.error('IK calculation failed:', res?.error)
+        return
+    }
+
+    const markerData = {
+        index: markerIndex,
+        pixel: { x: pixelCoords.x, y: pixelCoords.y },
+        world: { x: robotCoords.x, y: robotCoords.y },
+        local: res.local,
+        reach: res.reach,
+        ik: res.ik,               // { theta1~6 }
+        physical: res.physical,   // { slot1~6 }
+        pulse: res.pulse,         // { slot1~6 }
+        configName: res.config_name,
+        ikValid: res.valid,
+        arm: robotCoords.arm,
+        timestamp: new Date().toISOString()
+    }
+    testMarkers.push(markerData)
+    renderTestMarkers()
+}
+
+
+// Render all test markers from data (DOM is just a view)
+function renderTestMarkers() {
+    const svg = document.getElementById('overlay-svg')
+    if (!svg) return
+
+    // Get or create marker group with data-type
+    let markerGroup = svg.querySelector('[data-marker-type="test"]')
+    if (!markerGroup) {
+        markerGroup = document.createElementNS(SVG_NS, 'g')
+        markerGroup.setAttribute('data-marker-type', 'test')
+        svg.appendChild(markerGroup)
+    }
+
+    // Clear existing markers in group
+    markerGroup.innerHTML = ''
+
+    // Render each marker from data
+    testMarkers.forEach((data) => {
+        const armLabel = data.arm == 'left_arm' ? '왼팔' : '오른팔'
+
+        // Create marker circle
+        const circle = document.createElementNS(SVG_NS, 'circle')
+        circle.setAttribute('cx', data.pixel.x)
+        circle.setAttribute('cy', data.pixel.y)
+        circle.setAttribute('r', 8)
+        circle.setAttribute('fill', '#f59e0b')
+        circle.setAttribute('stroke', '#ffffff')
+        circle.setAttribute('stroke-width', 2)
+        circle.setAttribute('class', 'test-marker')
+        circle.setAttribute('data-marker-index', data.index)
+        circle.style.cursor = 'pointer'
+        circle.style.pointerEvents = 'auto'
+
+        // Add tooltip with World + Local + Reach + θ1
+        const title = document.createElementNS(SVG_NS, 'title')
+        title.textContent = `#${data.index}\nWorld: (${data.world.x.toFixed(1)}, ${data.world.y.toFixed(1)})\nLocal: (${data.local.x.toFixed(1)}, ${data.local.y.toFixed(1)})\nReach: ${data.reach.toFixed(1)} mm\nθ1: ${data.ik?.theta1?.toFixed(1) ?? '--'}°\nArm: ${armLabel}`
+        circle.appendChild(title)
+
+        // Add marker index label
+        const text = document.createElementNS(SVG_NS, 'text')
+        text.setAttribute('x', data.pixel.x)
+        text.setAttribute('y', data.pixel.y + 4)
+        text.setAttribute('text-anchor', 'middle')
+        text.setAttribute('fill', '#000')
+        text.setAttribute('font-size', '10')
+        text.setAttribute('font-weight', 'bold')
+        text.setAttribute('pointer-events', 'none')
+        text.setAttribute('data-marker-index', data.index)
+        text.textContent = data.index
+
+        markerGroup.appendChild(circle)
+        markerGroup.appendChild(text)
+
+        // Add click event for detail popup
+        circle.addEventListener('click', (e) => {
+            e.stopPropagation()
+            showMarkerDetail(data)
+        })
+    })
+}
+
+// Clear all test markers (data + DOM + popups)
+function clearTestMarkers() {
+    // 1. Clear data
+    testMarkers.length = 0
+
+    // 2. Clear DOM (find by data-marker-type)
+    const svg = document.getElementById('overlay-svg')
+    if (svg) {
+        const group = svg.querySelector('[data-marker-type="test"]')
+        if (group) group.innerHTML = ''
+    }
+
+    // 3. Close all popups
+    closeMarkerDetail()
+}
+
+// Popup counter for unique IDs and positioning
+let popupCounter = 0
+
+// Show marker detail popup (stays open until closed, supports multiple)
+function showMarkerDetail(markerData) {
+    const armLabel = markerData.arm == 'left_arm' ? '왼팔 (Left)' : '오른팔 (Right)'
+    const time = new Date(markerData.timestamp).toLocaleTimeString('ko-KR')
+
+    // Generate unique ID and position offset
+    const popupId = `marker-popup-${markerData.index}`
+    const offset = (popupCounter % 5) * 30
+    popupCounter++
+
+    // Remove existing popup for same marker if any
+    const existing = document.getElementById(popupId)
+    if (existing) existing.remove()
+
+    // Create popup container
+    const popup = document.createElement('div')
+    popup.id = popupId
+    popup.className = 'marker-detail-popup'
+    popup.style.cssText = `
+        position: fixed;
+        top: calc(30% + ${offset}px);
+        left: calc(60% + ${offset}px);
+        background: var(--bg-card, #1e1e2e);
+        border: 2px solid #f59e0b;
+        border-radius: 12px;
+        padding: 0;
+        min-width: 280px;
+        z-index: ${10000 + popupCounter};
+        box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+        color: var(--text-primary, #fff);
+        font-family: system-ui, sans-serif;
+        cursor: default;
+    `
+
+    popup.innerHTML = `
+        <div class="popup-header" style="
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 12px 16px;
+            background: #f59e0b;
+            border-radius: 10px 10px 0 0;
+            cursor: move;
+        ">
+            <h3 style="margin: 0; color: #000; font-size: 1rem; font-weight: 600;">📍 Point #${markerData.index}</h3>
+            <button class="popup-close-btn" style="
+                background: transparent;
+                border: none;
+                color: #000;
+                font-size: 1.2rem;
+                cursor: pointer;
+                padding: 0 4px;
+                line-height: 1;
+                opacity: 0.7;
+            ">&times;</button>
+        </div>
+        <div style="padding: 12px 16px;">
+            <table style="width: 100%; font-size: 0.85rem;">
+                <tr><td style="color: #888; padding: 3px 0;">Pixel</td><td style="text-align: right;"><code>(${markerData.pixel.x.toFixed(0)}, ${markerData.pixel.y.toFixed(0)})</code></td></tr>
+                <tr><td colspan="2" style="border-top: 1px solid #444; padding: 6px 0 3px; color: #666; font-size: 0.75rem;">좌표 (mm)</td></tr>
+                <tr><td style="color: #888; padding: 3px 0;">World</td><td style="text-align: right;"><code>(${markerData.world.x.toFixed(1)}, ${markerData.world.y.toFixed(1)})</code></td></tr>
+                <tr><td style="color: #888; padding: 3px 0;">Local</td><td style="text-align: right;"><code style="color: #4ade80;">(${markerData.local.x.toFixed(1)}, ${markerData.local.y.toFixed(1)})</code></td></tr>
+                <tr><td style="color: #888; padding: 3px 0;">Reach</td><td style="text-align: right;"><code style="color: #4ade80;">${markerData.reach.toFixed(1)}</code></td></tr>
+                <tr><td colspan="2" style="border-top: 1px solid #444; padding: 6px 0 3px; color: #666; font-size: 0.75rem;">IK Angles (${markerData.configName || 'Unknown'})</td></tr>
+                <tr><td style="color: #888; padding: 3px 0;">θ1</td><td style="text-align: right;"><code style="color: #60a5fa;">${markerData.ik?.theta1?.toFixed(1) ?? '--'}°</code></td></tr>
+                <tr><td style="color: #888; padding: 3px 0;">θ2</td><td style="text-align: right;"><code style="color: #60a5fa;">${markerData.ik?.theta2?.toFixed(1) ?? '--'}°</code></td></tr>
+                <tr><td style="color: #888; padding: 3px 0;">θ3</td><td style="text-align: right;"><code style="color: #60a5fa;">${markerData.ik?.theta3?.toFixed(1) ?? '--'}°</code></td></tr>
+                <tr><td style="color: #888; padding: 3px 0;">θ4</td><td style="text-align: right;"><code style="color: #60a5fa;">${markerData.ik?.theta4?.toFixed(1) ?? '--'}°</code></td></tr>
+                <tr><td colspan="2" style="border-top: 1px solid #444; padding: 6px 0 3px; color: #666; font-size: 0.75rem;">Physical / Pulse</td></tr>
+                <tr><td style="color: #888; padding: 3px 0;">Slot 1</td><td style="text-align: right;"><code>${markerData.physical?.slot1?.toFixed(1) ?? '--'}°</code> / <code style="color: #c084fc;">${markerData.pulse?.slot1 ?? '--'}</code></td></tr>
+                <tr><td style="color: #888; padding: 3px 0;">Slot 2</td><td style="text-align: right;"><code>${markerData.physical?.slot2?.toFixed(1) ?? '--'}°</code> / <code style="color: #c084fc;">${markerData.pulse?.slot2 ?? '--'}</code></td></tr>
+                <tr><td style="color: #888; padding: 3px 0;">Slot 3</td><td style="text-align: right;"><code>${markerData.physical?.slot3?.toFixed(1) ?? '--'}°</code> / <code style="color: #c084fc;">${markerData.pulse?.slot3 ?? '--'}</code></td></tr>
+                <tr><td style="color: #888; padding: 3px 0;">Slot 4</td><td style="text-align: right;"><code>${markerData.physical?.slot4?.toFixed(1) ?? '--'}°</code> / <code style="color: #c084fc;">${markerData.pulse?.slot4 ?? '--'}</code></td></tr>
+                <tr><td style="color: #888; padding: 3px 0;">Slot 5</td><td style="text-align: right;"><code>${markerData.physical?.slot5?.toFixed(1) ?? '--'}°</code> / <code style="color: #c084fc;">${markerData.pulse?.slot5 ?? '--'}</code></td></tr>
+                <tr><td style="color: #888; padding: 3px 0;">Slot 6</td><td style="text-align: right;"><code>${markerData.physical?.slot6?.toFixed(1) ?? '--'}°</code> / <code style="color: #c084fc;">${markerData.pulse?.slot6 ?? '--'}</code></td></tr>
+                <tr><td colspan="2" style="border-top: 1px solid #444; padding: 6px 0 3px;"></td></tr>
+                <tr><td style="color: #888; padding: 3px 0;">Arm</td><td style="text-align: right;">${armLabel}</td></tr>
+                <tr><td style="color: #888; padding: 3px 0;">Valid</td><td style="text-align: right;"><span style="color: ${markerData.ikValid ? '#4ade80' : '#f87171'};">${markerData.ikValid ? '✓' : '✗'}</span></td></tr>
+                <tr><td style="color: #888; padding: 3px 0;">Time</td><td style="text-align: right;">${time}</td></tr>
+            </table>
+        </div>
+    `
+
+
+    document.body.appendChild(popup)
+
+    // Close button handler
+    popup.querySelector('.popup-close-btn').addEventListener('click', () => popup.remove())
+
+    // Drag functionality
+    const header = popup.querySelector('.popup-header')
+    let isDragging = false
+    let dragStartX, dragStartY, popupStartX, popupStartY
+
+    header.addEventListener('mousedown', (e) => {
+        if (e.target.classList.contains('popup-close-btn')) return
+        isDragging = true
+        dragStartX = e.clientX
+        dragStartY = e.clientY
+        popupStartX = popup.offsetLeft
+        popupStartY = popup.offsetTop
+        popup.style.zIndex = 10000 + (++popupCounter)
+    })
+
+    document.addEventListener('mousemove', (e) => {
+        if (!isDragging) return
+        popup.style.left = (popupStartX + e.clientX - dragStartX) + 'px'
+        popup.style.top = (popupStartY + e.clientY - dragStartY) + 'px'
+    })
+
+    document.addEventListener('mouseup', () => {
+        isDragging = false
+    })
+}
+
+// Close all marker detail popups
+function closeMarkerDetail() {
+    document.querySelectorAll('.marker-detail-popup').forEach(p => p.remove())
+    popupCounter = 0
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Calibration Data Persistence
@@ -899,6 +1160,12 @@ async function loadCalibration() {
         renderOverlay()
         console.log('Calibration data restored from server')
         showSuccess('저장된 캘리브레이션 복원 완료')
+
+        // Enable test mode button if calibration is valid
+        if (overlayState.isCalibrated) {
+            enableTestModeButton()
+        }
+
         return true
     } catch (e) {
         console.error('Failed to load calibration:', e)
@@ -1004,6 +1271,7 @@ async function init() {
     initEventListeners()
     initOverlayTools()
     initTabs()
+    setupTestModeButton()
 
     // Load servo config for JSON preview
     await loadServoConfig()

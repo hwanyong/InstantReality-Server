@@ -137,6 +137,46 @@ export function applyHomography(H, point) {
     return { x: u, y: v }
 }
 
+/**
+ * Invert a 3x3 matrix using Cramer's rule
+ * @param {Array<Array<number>>} H - 3x3 matrix
+ * @returns {Array<Array<number>>} Inverted 3x3 matrix
+ */
+export function invertMatrix3x3(H) {
+    const a = H[0][0], b = H[0][1], c = H[0][2]
+    const d = H[1][0], e = H[1][1], f = H[1][2]
+    const g = H[2][0], h = H[2][1], i = H[2][2]
+
+    // Calculate determinant
+    const det = a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g)
+
+    if (Math.abs(det) < 1e-10) {
+        throw new Error('Matrix is singular and cannot be inverted')
+    }
+
+    const invDet = 1.0 / det
+
+    // Calculate adjugate matrix and divide by determinant
+    return [
+        [(e * i - f * h) * invDet, (c * h - b * i) * invDet, (b * f - c * e) * invDet],
+        [(f * g - d * i) * invDet, (a * i - c * g) * invDet, (c * d - a * f) * invDet],
+        [(d * h - e * g) * invDet, (b * g - a * h) * invDet, (a * e - b * d) * invDet]
+    ]
+}
+
+/**
+ * Convert Pixel coordinates to Robot coordinates using inverse Homography
+ * Note: This returns normalized robot coords (Y inverted for screen coords)
+ * 
+ * @param {Array<Array<number>>} H - 3x3 Homography matrix (Robot -> Pixel)
+ * @param {{x: number, y: number}} pixelPoint - Pixel coordinates
+ * @returns {{x: number, y: number}} Robot coordinates (mm)
+ */
+export function pixelToRobot(H, pixelPoint) {
+    const Hinv = invertMatrix3x3(H)
+    return applyHomography(Hinv, pixelPoint)
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Share Point Centered Proportional Mapping
 // ─────────────────────────────────────────────────────────────────────────────
@@ -241,29 +281,6 @@ export function applyBilinearTransform(map, point) {
 export function applyInverseHomography(H, point) {
     const Hinv = invertMatrix3x3(H)
     return applyHomography(Hinv, point)
-}
-
-/**
- * Compute inverse of 3x3 matrix
- * @param {Array<Array<number>>} M - 3x3 matrix
- * @returns {Array<Array<number>>} Inverse matrix
- */
-export function invertMatrix3x3(M) {
-    const [[a, b, c], [d, e, f], [g, h, i]] = M
-
-    const det = a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g)
-
-    if (Math.abs(det) < 1e-10) {
-        throw new Error('Matrix is singular, cannot invert')
-    }
-
-    const invDet = 1 / det
-
-    return [
-        [(e * i - f * h) * invDet, (c * h - b * i) * invDet, (b * f - c * e) * invDet],
-        [(f * g - d * i) * invDet, (a * i - c * g) * invDet, (c * d - a * f) * invDet],
-        [(d * h - e * g) * invDet, (b * g - a * h) * invDet, (a * e - b * d) * invDet]
-    ]
 }
 
 /**

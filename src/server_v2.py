@@ -532,6 +532,199 @@ async def handle_calibration_data_save(request):
     
     return web.json_response({"success": True, "role": role, "calibration": result})
 
+
+# =============================================================================
+# IK (Inverse Kinematics) API
+# =============================================================================
+
+async def handle_ik_calculate(request):
+    """POST /api/ik/calculate - Calculate IK angles for given World coordinates
+    
+    Request body:
+    {
+        "world_x": float,  # World X coordinate (mm, Share Point origin)
+        "world_y": float,  # World Y coordinate (mm, Share Point origin)
+        "z": float,        # Z height (mm, default: 3)
+        "arm": str         # "left_arm" or "right_arm"
+    }
+    
+    Returns:
+    {
+        "success": true,
+        "local": {"x": float, "y": float},
+        "reach": float,
+        "ik": {"theta1": ..., "theta2": ..., "theta3": ..., "theta4": ...},
+        "physical": {"slot1": ..., ..., "slot6": ...},
+        "pulse": {"slot1": ..., ..., "slot6": ...},
+        "config_name": str,
+        "valid": bool
+    }
+    """
+    import math
+    from lib.robot.pulse_mapper import PulseMapper
+    
+    pulse_mapper = PulseMapper()
+    
+    def calc_physical_pulse(ik_angle, slot_config, polarity=1):
+        """Calculate physical angle and pulse for a slot.
+        Args:
+            ik_angle: IK angle (degrees)
+            slot_config: Slot config from servo_config.json
+            polarity: +1 for normal, -1 for inverted (slot 4)
+        """
+        zero_offset = slot_config.get("zero_offset", 90)
+        act_range = slot_config.get("actuation_range", 180)
+        
+        phy = zero_offset + (polarity * ik_angle)
+        phy = max(0, min(act_range, phy))
+        
+        # Construct motor_config from slot config (like get_slot_params)
+        motor_config = {
+            "actuation_range": slot_config.get("actuation_range", 180),
+            "pulse_min": slot_config.get("pulse_min", 500),
+            "pulse_max": slot_config.get("pulse_max", 2500)
+        }
+        pulse = pulse_mapper.physical_to_pulse(phy, motor_config)
+        
+        return round(phy, 2), pulse
+    
+    try:
+        data = await request.json()
+        world_x = float(data.get("world_x", 0))
+        world_y = float(data.get("world_y", 0))
+        z = float(data.get("z", 3))  # Default Z = 3mm (ground level)
+        arm = data.get("arm", "right_arm")
+        
+        # Load servo config
+        config_path = Path(__file__).parent.parent / "tools" / "robot_calibrator" / "servo_config.json"
+        if not config_path.exists():
+            return web.json_response({"error": "servo_config.json not found"}, status=500)
+        
+        with open(config_path, 'r') as f:
+            servo_config = json.load(f)
+        
+        arm_config = servo_config.get(arm, {})
+        if not arm_config:
+            return web.json_response({"error": f"Invalid arm: {arm}"}, status=400)
+        
+        # Get slot configs
+        slot1 = arm_config.get("slot_1", {})
+        slot2 = arm_config.get("slot_2", {})
+        slot3 = arm_config.get("slot_3", {})
+        slot4 = arm_config.get("slot_4", {})
+        slot5 = arm_config.get("slot_5", {})
+        slot6 = arm_config.get("slot_6", {})
+        
+        # Get Base coordinates from geometry section
+        geometry = servo_config.get("geometry", {})
+        bases = geometry.get("bases", {})
+        base = bases.get(arm, {"x": 0, "y": 0})
+        base_x = float(base.get("x", 0))
+        base_y = float(base.get("y", 0))
+        
+        # Calculate Local coordinates (World → Local)
+        local_x = world_x - base_x
+        local_y = world_y - base_y
+        
+        # Get link lengths from config
+        d1 = slot1.get("length", 107.0)  # Base height
+        a2 = slot2.get("length", 105.0)  # Upper arm
+        a3 = slot3.get("length", 150.0)  # Forearm
+        a4 = slot4.get("length", 65.0)   # Wrist
+        a6 = slot6.get("length", 70.0)   # Gripper
+        
+        # θ1 calculation (Base Yaw) - Y=forward, CCW positive
+        if local_x == 0 and local_y == 0:
+            theta1 = 0.0
+        else:
+            theta1 = math.degrees(math.atan2(-local_x, local_y))
+        
+        # Reach (horizontal distance from Base)
+        reach = math.sqrt(local_x**2 + local_y**2)
+        
+        # 5-Link IK: Gripper tip reaches target at -90° (pointing down)
+        wrist_z = z + a4 + a6
+        
+        # 2-Link Planar IK in R-Z plane
+        s = wrist_z - d1
+        dist_sq = reach**2 + s**2
+        dist = math.sqrt(dist_sq)
+        
+        max_reach = a2 + a3
+        min_reach = abs(a2 - a3)
+        
+        # Fixed angles for Slot 5, 6
+        theta5 = 0.0   # Wrist Roll: neutral
+        theta6 = 0.0   # Gripper: open (will use default from config)
+        
+        # Reachability check
+        is_valid = True
+        config_name = "Elbow Up"
+        
+        if dist > max_reach or dist < min_reach or dist < 0.001:
+            # Pointing fallback
+            theta2 = math.degrees(math.atan2(s, reach)) if reach > 0 else (90.0 if s >= 0 else -90.0)
+            theta3 = 0.0
+            theta4 = -90.0 - theta2
+            is_valid = False
+            config_name = "Pointing"
+        else:
+            # Law of Cosines for elbow angle (θ3)
+            cos_theta3 = (dist_sq - a2**2 - a3**2) / (2 * a2 * a3)
+            cos_theta3 = max(-1.0, min(1.0, cos_theta3))
+            theta3_rad = math.acos(cos_theta3)
+            
+            # Shoulder angle components
+            beta = math.atan2(s, reach)
+            cos_alpha = (a2**2 + dist_sq - a3**2) / (2 * a2 * dist)
+            cos_alpha = max(-1.0, min(1.0, cos_alpha))
+            alpha = math.acos(cos_alpha)
+            
+            # Elbow Up solution
+            theta2 = math.degrees(beta + alpha)
+            theta3 = -math.degrees(theta3_rad)
+            theta3 = -theta3  # inversion for min_pos: top
+            
+            # θ4: keep gripper pointing down
+            theta4 = -90.0 - theta2 + theta3
+        
+        # Calculate Physical angles and Pulses for all slots
+        phy1, pls1 = calc_physical_pulse(theta1, slot1, polarity=1)
+        phy2, pls2 = calc_physical_pulse(theta2, slot2, polarity=1)
+        phy3, pls3 = calc_physical_pulse(theta3, slot3, polarity=1)
+        phy4, pls4 = calc_physical_pulse(theta4, slot4, polarity=-1)  # Inverted!
+        phy5, pls5 = calc_physical_pulse(theta5, slot5, polarity=1)
+        phy6, pls6 = calc_physical_pulse(theta6, slot6, polarity=1)
+        
+        return web.json_response({
+            "success": True,
+            "local": {"x": round(local_x, 2), "y": round(local_y, 2)},
+            "reach": round(reach, 2),
+            "ik": {
+                "theta1": round(theta1, 2),
+                "theta2": round(theta2, 2),
+                "theta3": round(theta3, 2),
+                "theta4": round(theta4, 2),
+                "theta5": round(theta5, 2),
+                "theta6": round(theta6, 2)
+            },
+            "physical": {
+                "slot1": phy1, "slot2": phy2, "slot3": phy3,
+                "slot4": phy4, "slot5": phy5, "slot6": phy6
+            },
+            "pulse": {
+                "slot1": pls1, "slot2": pls2, "slot3": pls3,
+                "slot4": pls4, "slot5": pls5, "slot6": pls6
+            },
+            "config_name": config_name,
+            "valid": is_valid
+        })
+        
+    except Exception as e:
+        logger.error(f"IK calculation error: {e}")
+        return web.json_response({"error": str(e)}, status=500)
+
+
 # =============================================================================
 # WebRTC Handlers
 # =============================================================================
@@ -865,6 +1058,8 @@ def create_app():
         web.get('/api/calibration/geometry', handle_calibration_geometry),
         web.get('/api/calibration/{role}', handle_calibration_data_get),
         web.post('/api/calibration', handle_calibration_data_save),
+        # IK API
+        web.post('/api/ik/calculate', handle_ik_calculate),
     ]
     
     for route in api_routes:

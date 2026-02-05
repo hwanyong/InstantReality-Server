@@ -141,6 +141,45 @@ async def handle_release(request):
     })
 
 
+async def handle_move_to(request):
+    """
+    POST /api/robot/move_to
+    Move robot arm to specified coordinates.
+    (Currently returns dummy response - motor control disabled)
+    
+    Body: {
+        "x": 200.0,        # Robot mm (relative to share point)
+        "y": 100.0,        # Robot mm
+        "z": 5.0,          # Robot mm (default 5)
+        "arm": "auto",     # "left" | "right" | "auto"
+        "motion_time": 2.0 # Seconds (default 2)
+    }
+    """
+    data = await request.json()
+    x = data.get("x", 0.0)
+    y = data.get("y", 0.0)
+    z = data.get("z", 5.0)
+    arm = data.get("arm", "auto")
+    motion_time = data.get("motion_time", 2.0)
+    
+    # Auto arm selection: x < 0 -> left, x >= 0 -> right
+    if arm == "auto":
+        arm = "left_arm" if x < 0 else "right_arm"
+    elif arm == "left":
+        arm = "left_arm"
+    elif arm == "right":
+        arm = "right_arm"
+    
+    # Return dummy success response (no actual motor control)
+    return web.json_response({
+        "success": True,
+        "arm": arm,
+        "target": {"x": x, "y": y, "z": z},
+        "motion_time": motion_time,
+        "message": "Simulated move (motor control disabled)"
+    })
+
+
 def setup_routes(app):
     """Register robot API routes with the app."""
     app.router.add_post('/api/robot/connect', handle_connect)
@@ -149,3 +188,5 @@ def setup_routes(app):
     app.router.add_post('/api/robot/zero', handle_zero)
     app.router.add_get('/api/robot/status', handle_status)
     app.router.add_post('/api/robot/release', handle_release)
+    app.router.add_post('/api/robot/move_to', handle_move_to)
+
