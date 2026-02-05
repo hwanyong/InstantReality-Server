@@ -2,7 +2,7 @@
 # HTTP endpoints for robot control
 
 from aiohttp import web
-from lib.robot import DualArmController
+from lib.robot import RobotController
 
 # Singleton controller instance
 robot_controller = None
@@ -12,7 +12,7 @@ def get_controller():
     """Get or create the robot controller instance."""
     global robot_controller
     if robot_controller is None:
-        robot_controller = DualArmController()
+        robot_controller = RobotController()
     return robot_controller
 
 

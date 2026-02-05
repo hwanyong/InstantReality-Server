@@ -1263,6 +1263,158 @@ function updateJsonPreview() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Robot Control
+// ─────────────────────────────────────────────────────────────────────────────
+
+function initRobotControl() {
+    const connectBtn = document.getElementById('robot-connect-btn')
+    const disconnectBtn = document.getElementById('robot-disconnect-btn')
+    const homeBtn = document.getElementById('go-home-btn')
+    const zeroBtn = document.getElementById('go-zero-btn')
+    const statusSpan = document.getElementById('robot-status')
+    const speedSlider = document.getElementById('motion-speed')
+    const speedValue = document.getElementById('speed-value')
+
+    if (!connectBtn) return // Robot Control tab not present
+
+    // Speed slider update
+    if (speedSlider && speedValue) {
+        speedSlider.addEventListener('input', () => {
+            speedValue.textContent = `${speedSlider.value}s`
+        })
+    }
+
+    // Connect button
+    connectBtn.addEventListener('click', async () => {
+        connectBtn.disabled = true
+        statusSpan.textContent = 'Connecting...'
+
+        try {
+            const res = await fetch('/api/robot/connect', { method: 'POST' })
+            const data = await res.json()
+
+            if (data.success) {
+                statusSpan.textContent = 'Connected'
+                statusSpan.className = 'robot-status-inline connected'
+                disconnectBtn.disabled = false
+                homeBtn.disabled = false
+                zeroBtn.disabled = false
+                connectBtn.disabled = true
+            } else {
+                statusSpan.textContent = data.error || 'Connection failed'
+                connectBtn.disabled = false
+            }
+        } catch (e) {
+            console.error('Robot connect error:', e)
+            statusSpan.textContent = 'Error'
+            connectBtn.disabled = false
+        }
+    })
+
+    // Disconnect button
+    disconnectBtn.addEventListener('click', async () => {
+        try {
+            await fetch('/api/robot/disconnect', { method: 'POST' })
+            statusSpan.textContent = 'Disconnected'
+            statusSpan.className = 'robot-status-inline'
+            disconnectBtn.disabled = true
+            homeBtn.disabled = true
+            zeroBtn.disabled = true
+            connectBtn.disabled = false
+        } catch (e) {
+            console.error('Robot disconnect error:', e)
+        }
+    })
+
+    // Home button
+    homeBtn.addEventListener('click', async () => {
+        const motionTime = parseFloat(speedSlider?.value || 3)
+        homeBtn.disabled = true
+        homeBtn.textContent = '🏠 Moving...'
+
+        try {
+            const res = await fetch('/api/robot/home', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ motion_time: motionTime })
+            })
+            const data = await res.json()
+
+            if (data.success) {
+                console.log('Home position reached')
+            } else {
+                console.error('Home failed:', data.error)
+            }
+        } catch (e) {
+            console.error('Home error:', e)
+        } finally {
+            homeBtn.disabled = false
+            homeBtn.textContent = '🏠 Home'
+        }
+    })
+
+    // Zero button
+    zeroBtn.addEventListener('click', async () => {
+        const motionTime = parseFloat(speedSlider?.value || 3)
+        zeroBtn.disabled = true
+        zeroBtn.textContent = '📐 Moving...'
+
+        try {
+            const res = await fetch('/api/robot/zero', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ motion_time: motionTime })
+            })
+            const data = await res.json()
+
+            if (data.success) {
+                console.log('Zero position reached')
+            } else {
+                console.error('Zero failed:', data.error)
+            }
+        } catch (e) {
+            console.error('Zero error:', e)
+        } finally {
+            zeroBtn.disabled = false
+            zeroBtn.textContent = '📐 Zero'
+        }
+    })
+
+    // Check initial status
+    fetchRobotStatus()
+}
+
+async function fetchRobotStatus() {
+    try {
+        const res = await fetch('/api/robot/status')
+        const data = await res.json()
+
+        if (data.success && data.status) {
+            const isConnected = data.status.connected
+            const statusSpan = document.getElementById('robot-status')
+            const connectBtn = document.getElementById('robot-connect-btn')
+            const disconnectBtn = document.getElementById('robot-disconnect-btn')
+            const homeBtn = document.getElementById('go-home-btn')
+            const zeroBtn = document.getElementById('go-zero-btn')
+
+            if (isConnected) {
+                statusSpan.textContent = 'Connected'
+                statusSpan.className = 'robot-status-inline connected'
+                connectBtn.disabled = true
+                disconnectBtn.disabled = false
+                homeBtn.disabled = false
+                zeroBtn.disabled = false
+            } else {
+                statusSpan.textContent = 'Disconnected'
+                statusSpan.className = 'robot-status-inline'
+            }
+        }
+    } catch (e) {
+        console.error('Status check failed:', e)
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Initialize
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -1272,6 +1424,7 @@ async function init() {
     initOverlayTools()
     initTabs()
     setupTestModeButton()
+    initRobotControl()
 
     // Load servo config for JSON preview
     await loadServoConfig()
