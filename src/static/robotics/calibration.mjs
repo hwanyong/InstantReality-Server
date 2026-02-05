@@ -850,14 +850,20 @@ function enableTestModeButton() {
 const testMarkers = []
 
 // Add test marker data (data only, then render)
+// Only keeps ONE marker - new click replaces previous
 async function addTestMarker(pixelCoords, robotCoords) {
-    const markerIndex = testMarkers.length + 1
+    // Clear previous markers (keep only 1)
+    testMarkers.length = 0
+    renderTestMarkers()  // Clear DOM
+
+    const markerIndex = 1  // Always index 1 (single marker)
 
     // Get ALL data from server (Single Source of Truth)
     const res = await calculateIK(robotCoords.x, robotCoords.y, robotCoords.arm)
 
     if (!res || !res.success) {
         console.error('IK calculation failed:', res?.error)
+        showError('IK 계산 실패')
         return
     }
 
@@ -877,6 +883,36 @@ async function addTestMarker(pixelCoords, robotCoords) {
     }
     testMarkers.push(markerData)
     renderTestMarkers()
+
+    // Get Speed from slider
+    const speedSlider = document.getElementById('motion-speed')
+    const motionTime = parseFloat(speedSlider?.value || 3)
+
+    // Call move_to API to actually move the robot
+    try {
+        const moveRes = await fetch('/api/robot/move_to', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                x: robotCoords.x,
+                y: robotCoords.y,
+                z: 5,  // Default Z height
+                arm: robotCoords.arm,
+                motion_time: motionTime
+            })
+        })
+
+        const moveData = await moveRes.json()
+
+        if (moveData.success) {
+            showToast(`🤖 이동 중... (${motionTime}s)`)
+        } else {
+            showError(`이동 실패: ${moveData.error || moveData.message}`)
+        }
+    } catch (err) {
+        console.error('Move API error:', err)
+        showError('로봇 이동 API 호출 실패')
+    }
 }
 
 
