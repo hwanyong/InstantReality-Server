@@ -830,7 +830,24 @@ class CalibratorGUI:
         messagebox.showinfo("I2C Scan", "PCA9685 expected at address 0x40\n(Full scan not implemented via Serial)")
 
     def _on_save_config(self):
-        """Save current configuration."""
+        """Save current configuration with verification."""
+        # Run verification before saving
+        try:
+            from verify_engine import run_verification
+            result = run_verification(self.manager.config)
+            
+            if not result["is_valid"]:
+                msg = f"Total error: {result['total_error']:.1f}mm\n"
+                msg += f"Largest: {result['largest_error']}\n\n"
+                msg += "Save anyway?"
+                
+                if not messagebox.askyesno("Verification Warning", msg):
+                    return
+        except Exception as e:
+            # If verification fails, ask user
+            if not messagebox.askyesno("Warning", f"Verification failed: {e}\n\nSave anyway?"):
+                return
+        
         if self.manager.save_config():
             messagebox.showinfo("Success", "Configuration saved")
         else:
