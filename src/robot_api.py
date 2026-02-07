@@ -170,7 +170,7 @@ async def handle_move_to(request):
     data = await request.json()
     x = data.get("x", 0.0)
     y = data.get("y", 0.0)
-    z = data.get("z", 5.0)
+    z = data.get("z", 1.0)
     arm = data.get("arm", "auto")
     motion_time = data.get("motion_time", 2.0)
     
@@ -193,6 +193,10 @@ async def handle_move_to(request):
     arm_config = servo_config.get(arm, {})
     if not arm_config:
         return web.json_response({"success": False, "error": f"Invalid arm: {arm}"}, status=400)
+    
+    # Apply per-arm Z offset calibration
+    z_offset = arm_config.get("z_offset", 0)
+    z = z + z_offset
     
     # Get slot configs and channels
     slots = {}
@@ -262,6 +266,12 @@ async def handle_move_to(request):
         theta3 = math.degrees(theta3_rad)
         theta4 = -90.0 - theta2 + theta3
     
+    # IK debug logging
+    print(f"[IK] input=(x={x}, y={y}, z={z}, z_offset={z_offset}) arm={arm}")
+    print(f"[IK] links d1={d1} a2={a2} a3={a3} a4={a4} a6={a6}")
+    print(f"[IK] wrist_z={wrist_z} s={s} reach={reach:.1f} dist={dist:.1f} valid={is_valid}")
+    print(f"[IK] θ1={theta1:.1f} θ2={theta2:.1f} θ3={theta3:.1f} θ4={theta4:.1f}")
+    
     # Calculate pulses
     pulse_mapper = PulseMapper()
     
@@ -284,15 +294,17 @@ async def handle_move_to(request):
     pls5 = calc_pulse(theta5, slots[5], polarity=1)
     pls6 = calc_pulse(theta6, slots[6], polarity=1)
     
-    # Build targets with channels
+    print(f"[IK] pulses p1={pls1} p2={pls2} p3={pls3} p4={pls4} p5={pls5}")
+    
+    # Build targets with channels (exclude slot 6 = gripper)
     targets = []
-    for i in range(1, 7):
+    for i in range(1, 6):
         channel = slots[i].get("channel", i - 1)
-        pulse = [pls1, pls2, pls3, pls4, pls5, pls6][i - 1]
+        pulse = [pls1, pls2, pls3, pls4, pls5][i - 1]
         targets.append((channel, pulse))
     
     # Execute movement
-    success = controller.move_to_pulses(targets, motion_time)
+    success = controller.move_to_pulses(targets, motion_time, wait=True)
     
     return web.json_response({
         "success": success,
@@ -304,6 +316,72 @@ async def handle_move_to(request):
     })
 
 
+async def handle_gripper_open(request):
+    """
+    POST /api/robot/gripper/open
+    Open the gripper to release an object.
+    Body: { "arm": "right" } (optional, default "right")
+    """
+    controller = get_controller()
+    
+    if not controller.is_connected():
+        return web.json_response({
+            "success": False,
+            "error": "Robot not connected"
+        }, status=400)
+    
+    data = {}
+    if request.body_exists:
+        data = await request.json()
+    
+    arm = data.get("arm", "right")
+    
+    try:
+        controller.open_gripper(arm)
+        return web.json_response({
+            "success": True,
+            "message": f"Gripper opened ({arm})"
+        })
+    except Exception as e:
+        return web.json_response({
+            "success": False,
+            "error": str(e)
+        }, status=500)
+
+
+async def handle_gripper_close(request):
+    """
+    POST /api/robot/gripper/close
+    Close the gripper to grasp an object.
+    Body: { "arm": "right" } (optional, default "right")
+    """
+    controller = get_controller()
+    
+    if not controller.is_connected():
+        return web.json_response({
+            "success": False,
+            "error": "Robot not connected"
+        }, status=400)
+    
+    data = {}
+    if request.body_exists:
+        data = await request.json()
+    
+    arm = data.get("arm", "right")
+    
+    try:
+        controller.close_gripper(arm)
+        return web.json_response({
+            "success": True,
+            "message": f"Gripper closed ({arm})"
+        })
+    except Exception as e:
+        return web.json_response({
+            "success": False,
+            "error": str(e)
+        }, status=500)
+
+
 def setup_routes(app):
     """Register robot API routes with the app."""
     app.router.add_post('/api/robot/connect', handle_connect)
@@ -313,4 +391,6 @@ def setup_routes(app):
     app.router.add_get('/api/robot/status', handle_status)
     app.router.add_post('/api/robot/release', handle_release)
     app.router.add_post('/api/robot/move_to', handle_move_to)
+    app.router.add_post('/api/robot/gripper/open', handle_gripper_open)
+    app.router.add_post('/api/robot/gripper/close', handle_gripper_close)
 

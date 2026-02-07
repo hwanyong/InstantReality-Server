@@ -91,3 +91,13 @@ class MotionPlanner:
         self._stop_flag = True
         if self._motion_thread and self._motion_thread.is_alive():
             self._motion_thread.join(timeout=0.5)
+
+    def wait_for_completion(self, timeout=10.0):
+        """Block until current motion completes."""
+        if self._motion_thread and self._motion_thread.is_alive():
+            self._motion_thread.join(timeout=timeout)
+        return not (self._motion_thread and self._motion_thread.is_alive())
+
+    def is_moving(self):
+        """Check if motion is in progress."""
+        return self._motion_thread is not None and self._motion_thread.is_alive()

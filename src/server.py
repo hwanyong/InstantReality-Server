@@ -241,6 +241,69 @@ async def handle_scene_get(request):
     return web.json_response({"objects": SCENE_INVENTORY})
 
 
+async def handle_gemini_analyze(request):
+    """POST /api/gemini/analyze - Analyze frame with natural language instruction.
+    
+    Body: { "instruction": "Pick up the red pen" }
+    Response: { "target_detected": true, "coordinates": [y, x], "description": "..." }
+    """
+    if not request.body_exists:
+        return web.json_response({"error": "Missing request body"}, status=400)
+    
+    data = await request.json()
+    instruction = data.get("instruction", "").strip()
+    
+    if not instruction:
+        return web.json_response({"error": "instruction is required"}, status=400)
+    
+    # Capture frame from TopView camera (server-side)
+    topview_idx = get_index_by_role("TopView")
+    if topview_idx is None:
+        return web.json_response({"error": "TopView camera not configured"}, status=400)
+    
+    topview_cam = get_camera(topview_idx)
+    frame_bgr, _ = topview_cam.get_frames()
+    
+    if frame_bgr is None:
+        return web.json_response({"error": "Failed to capture frame"}, status=500)
+    
+    # Call Gemini Brain
+    result = brain.analyze_frame(frame_bgr, instruction)
+    
+    return web.json_response(result)
+
+
+async def handle_gemini_execute(request):
+    """POST /api/gemini/execute - Generate robot execution plan via Function Calling.
+    
+    Body: { "instruction": "Pick up the red pen" }
+    Returns the plan. Execution is handled client-side step by step.
+    """
+    if not request.body_exists:
+        return web.json_response({"error": "Missing request body"}, status=400)
+    
+    data = await request.json()
+    instruction = data.get("instruction", "").strip()
+    
+    if not instruction:
+        return web.json_response({"error": "instruction is required"}, status=400)
+    
+    # Capture frame from TopView camera
+    topview_idx = get_index_by_role("TopView")
+    if topview_idx is None:
+        return web.json_response({"error": "TopView camera not configured"}, status=400)
+    
+    topview_cam = get_camera(topview_idx)
+    frame_bgr, _ = topview_cam.get_frames()
+    
+    if frame_bgr is None:
+        return web.json_response({"error": "Failed to capture frame"}, status=500)
+    
+    # Generate execution plan via Function Calling
+    plan = brain.execute_with_tools(frame_bgr, instruction)
+    
+    return web.json_response(plan)
+
 # =============================================================================
 # Camera Management API
 # =============================================================================
@@ -1051,6 +1114,9 @@ def create_app():
         web.get('/api/capture_all', handle_capture_all),
         web.post('/api/scene/init', handle_scene_init),
         web.get('/api/scene', handle_scene_get),
+        # Gemini API
+        web.post('/api/gemini/analyze', handle_gemini_analyze),
+        web.post('/api/gemini/execute', handle_gemini_execute),
         # Camera Management API
         web.post('/api/cameras/scan', handle_cameras_scan),
         web.post('/api/cameras/assign', handle_cameras_assign),

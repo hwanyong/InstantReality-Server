@@ -7,6 +7,256 @@
     <title>Gemini Robotics Control</title>
     <meta name="description" content="AI-powered robot arm control interface using Gemini API">
     <link rel="stylesheet" href="styles.css">
+    <style>
+        /* Gemini Control - Page-specific styles */
+
+        /* Camera Area */
+        .camera-area {
+            flex: 1;
+            min-height: 0;
+            padding: 16px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background: var(--bg-primary);
+        }
+
+        #camera-container {
+            position: relative;
+            width: 100%;
+            height: 100%;
+        }
+
+        #camera-container video {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            border: 2px solid var(--accent);
+            border-radius: 8px;
+            background: #000;
+        }
+
+        #overlay-svg {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            border-radius: 8px;
+        }
+
+        #overlay-svg rect.bbox {
+            fill: none;
+            stroke: #58a6ff;
+            stroke-width: 3;
+        }
+
+        #overlay-svg circle.center-point {
+            fill: #f5576c;
+        }
+
+        #overlay-svg .bbox-label {
+            font-size: 24px;
+            font-family: Inter, sans-serif;
+            fill: #fff;
+            paint-order: stroke;
+            stroke: rgba(0, 0, 0, 0.7);
+            stroke-width: 4;
+        }
+
+        #camera-label {
+            position: absolute;
+            top: 12px;
+            left: 16px;
+            font-size: 12px;
+            color: var(--accent);
+            background: rgba(0, 0, 0, 0.7);
+            padding: 4px 10px;
+            border-radius: 4px;
+            z-index: 1;
+        }
+
+        /* Layout */
+        .gemini-layout {
+            display: flex;
+            flex-direction: column;
+            height: calc(100vh - 60px);
+            padding: 0;
+        }
+
+        /* Bottom Dock */
+        .bottom-dock {
+            height: 280px;
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 12px;
+            padding: 12px 16px;
+            background: var(--bg-card);
+            border-top: 1px solid var(--border-color);
+        }
+
+        /* Command Panel */
+        .command-panel {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .command-panel h3 {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            margin: 0;
+        }
+
+        .command-panel textarea {
+            flex: 1;
+            min-height: 60px;
+            padding: 10px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            color: var(--text-primary);
+            font-size: 0.85rem;
+            resize: none;
+            margin: 0;
+        }
+
+        .command-panel textarea:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+
+        .command-actions {
+            display: flex;
+            gap: 8px;
+        }
+
+        .command-actions .btn-primary {
+            flex: 1;
+        }
+
+        .command-actions .btn {
+            padding: 8px 14px;
+            font-size: 0.8rem;
+        }
+
+        /* Result Panel */
+        .result-panel {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            min-width: 0;
+            min-height: 0;
+            overflow: hidden;
+        }
+
+        .result-panel h3 {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            margin: 0;
+        }
+
+        #gemini-result {
+            flex: 1;
+            padding: 10px;
+            background: var(--bg-secondary);
+            border-radius: 8px;
+            font-family: 'Consolas', monospace;
+            font-size: 0.7rem;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            color: var(--text-secondary);
+        }
+
+        /* Task Plan Panel */
+        .task-plan-panel {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            min-width: 0;
+        }
+
+        .task-plan-panel h3 {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            margin: 0;
+        }
+
+        #task-steps {
+            flex: 1;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .task-step {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 10px;
+            background: var(--bg-secondary);
+            border-radius: 6px;
+            font-size: 0.75rem;
+            color: var(--text-primary);
+            border-left: 3px solid var(--border-color);
+        }
+
+        .task-step.pending {
+            border-left-color: #6b7280;
+        }
+
+        .task-step.running {
+            border-left-color: #3b82f6;
+            background: rgba(59, 130, 246, 0.1);
+        }
+
+        .task-step.done {
+            border-left-color: #10b981;
+        }
+
+        .task-step.error {
+            border-left-color: #ef4444;
+        }
+
+        .task-step .step-icon {
+            width: 18px;
+            text-align: center;
+        }
+
+        .task-step .step-text {
+            flex: 1;
+            font-family: 'Consolas', monospace;
+        }
+
+        .task-plan-actions {
+            display: flex;
+            gap: 6px;
+        }
+
+        .task-plan-actions .btn {
+            flex: 1;
+            padding: 6px 10px;
+            font-size: 0.75rem;
+        }
+
+        /* Nav Links */
+        .nav-links {
+            display: flex;
+            gap: 12px;
+        }
+
+        .nav-links a {
+            color: var(--accent);
+            text-decoration: none;
+            font-size: 0.875rem;
+        }
+
+        .nav-links a:hover {
+            text-decoration: underline;
+        }
+    </style>
 </head>
 
 <body>
@@ -15,28 +265,58 @@
         <header class="header">
             <h1>🤖 Gemini Robotics</h1>
             <div class="status-bar">
+                <nav class="nav-links">
+                    <a href="calibration.html">🎯 Calibration</a>
+                    <a href="settings.html">⚙️ Settings</a>
+                </nav>
                 <span id="connection-status" class="status disconnected">● Disconnected</span>
                 <button id="estop-btn" class="btn-danger">🛑 E-STOP</button>
             </div>
         </header>
 
-        <main class="main-content">
-            <!-- Left Panel: Video + AR Overlay -->
-            <section class="video-section">
-                <h2>📹 Camera View</h2>
-                <div class="video-container">
-                    <canvas id="video-canvas" width="800" height="450"></canvas>
+        <main class="gemini-layout">
+            <!-- Camera Area -->
+            <section class="camera-area">
+                <div id="camera-container">
+                    <video id="camera-0" autoplay playsinline muted></video>
+                    <svg id="overlay-svg" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet">
+                        <g id="result-group"></g>
+                    </svg>
+                    <div id="camera-label">📹 TopView</div>
                 </div>
             </section>
 
-            <!-- Right Panel: Controls -->
-            <section class="control-section">
-                <!-- Prompt Input -->
-                <div class="control-card">
+            <!-- Bottom Dock -->
+            <section class="bottom-dock">
+                <!-- Command Panel -->
+                <div class="command-panel">
                     <h3>💬 Natural Language Command</h3>
                     <textarea id="prompt-input" placeholder="예: 빨간 펜을 집어줘&#10;Pick up the red pen"></textarea>
-                    <button id="send-prompt-btn" class="btn-primary">🚀 Send to Gemini</button>
-                    <div id="gemini-result" class="result-box"></div>
+                    <div class="command-actions">
+                        <button id="send-prompt-btn" class="btn-primary">🚀 Analyze</button>
+                        <button id="scan-btn" class="btn">🔍 Scan</button>
+                        <button id="execute-btn" class="btn-primary" style="background:#10b981">⚡ Execute</button>
+                    </div>
+                </div>
+
+                <!-- Result Panel -->
+                <div class="result-panel">
+                    <h3>📋 Gemini Response</h3>
+                    <pre id="gemini-result">Waiting for command...</pre>
+                </div>
+
+                <!-- Task Plan Panel -->
+                <div class="task-plan-panel">
+                    <h3>📝 Task Plan</h3>
+                    <div id="task-steps">
+                        <div class="task-step pending"><span class="step-icon">⏳</span><span class="step-text">No plan
+                                yet</span></div>
+                    </div>
+                    <div class="task-plan-actions">
+                        <button id="run-plan-btn" class="btn" disabled>▶️ Run Plan</button>
+                        <button id="abort-plan-btn" class="btn-danger" disabled
+                            style="font-size:0.75rem;padding:6px 10px">⏹ Abort</button>
+                    </div>
                 </div>
             </section>
         </main>

@@ -155,6 +155,7 @@ class RobotController:
         
         # Execute smooth motion
         self.motion_planner.move_all(targets, motion_time)
+        self.motion_planner.wait_for_completion(timeout=motion_time + 2.0)
         return True
     
     def go_zero(self, motion_time=3.0):
@@ -186,6 +187,7 @@ class RobotController:
         
         # Execute smooth motion
         self.motion_planner.move_all(targets, motion_time)
+        self.motion_planner.wait_for_completion(timeout=motion_time + 2.0)
         return True
     
     def release_all(self):
@@ -202,13 +204,14 @@ class RobotController:
             "sender_running": self._sender_running
         }
     
-    def move_to_pulses(self, targets, motion_time=2.0):
+    def move_to_pulses(self, targets, motion_time=2.0, wait=False):
         """
         Move specified channels to target pulses with smooth motion.
         
         Args:
             targets: List of (channel, pulse) tuples
             motion_time: Duration for motion in seconds
+            wait: If True, block until motion completes
         
         Returns:
             bool: True if command was issued
@@ -218,4 +221,58 @@ class RobotController:
         
         self.servo_state.clear_history()
         self.motion_planner.move_all(targets, motion_time)
+        if wait:
+            self.motion_planner.wait_for_completion(timeout=motion_time + 2.0)
         return True
+    
+    def _normalize_arm(self, arm):
+        """Normalize arm parameter to config key."""
+        if arm in ("left_arm", "right_arm"):
+            return arm
+        if arm == "left":
+            return "left_arm"
+        return "right_arm"
+    
+    def open_gripper(self, arm="right", motion_time=0.5):
+        """
+        Open the gripper (slot_6 → min_pulse).
+        
+        Args:
+            arm: "left", "right", "left_arm", or "right_arm"
+            motion_time: Duration for motion in seconds
+        
+        Returns:
+            bool: True if command was issued
+        """
+        if not self.is_connected():
+            return False
+        
+        arm_key = self._normalize_arm(arm)
+        slot_config = self.config.get(arm_key, {}).get("slot_6", {})
+        channel = slot_config.get("channel", 5)
+        open_pulse = slot_config.get("min_pulse", 500)
+        
+        print(f"[RobotController] open_gripper({arm_key}) ch={channel} pulse={open_pulse}")
+        return self.move_to_pulses([(channel, open_pulse)], motion_time, wait=True)
+    
+    def close_gripper(self, arm="right", motion_time=0.5):
+        """
+        Close the gripper (slot_6 → max_pulse_limit).
+        
+        Args:
+            arm: "left", "right", "left_arm", or "right_arm"
+            motion_time: Duration for motion in seconds
+        
+        Returns:
+            bool: True if command was issued
+        """
+        if not self.is_connected():
+            return False
+        
+        arm_key = self._normalize_arm(arm)
+        slot_config = self.config.get(arm_key, {}).get("slot_6", {})
+        channel = slot_config.get("channel", 5)
+        close_pulse = slot_config.get("max_pulse_limit", 1250)
+        
+        print(f"[RobotController] close_gripper({arm_key}) ch={channel} pulse={close_pulse}")
+        return self.move_to_pulses([(channel, close_pulse)], motion_time, wait=True)

@@ -394,7 +394,201 @@ Rules:
             print(f"Refine Error for {label}: {e}")
             return None
 
+    def execute_with_tools(self, frame_bgr, instruction):
+        """
+        Generate a robot execution plan using Gemini Function Calling.
+        
+        Returns a list of tool calls (steps) that the server should execute sequentially.
+        Does NOT execute robot commands — the caller handles actual execution.
+        
+        Returns:
+            {
+                "steps": [
+                    {"tool": "move_arm", "args": {"x": 200, "y": 100, "z": 5, "arm": "auto"}, "description": "..."},
+                    {"tool": "close_gripper", "args": {"arm": "right"}, "description": "..."},
+                    ...
+                ],
+                "summary": "Pick up the red pen"
+            }
+        """
+        if not self.client:
+            return {"error": "AI not initialized (Missing API Key)", "steps": []}
+
+        try:
+            image_bytes = self._encode_frame(frame_bgr)
+            if image_bytes is None:
+                return {"error": "Failed to encode frame", "steps": []}
+
+            # Define robot tools for Function Calling
+            robot_tools = types.Tool(
+                function_declarations=[
+                    types.FunctionDeclaration(
+                        name="move_arm",
+                        description="Move robot arm to a position in the image. Specify x,y as image coordinates (0-1000 normalized).",
+                        parameters=types.Schema(
+                            type="OBJECT",
+                            properties={
+                                "x": types.Schema(type="NUMBER", description="X position in image (0=left edge, 1000=right edge)"),
+                                "y": types.Schema(type="NUMBER", description="Y position in image (0=top edge, 1000=bottom edge)"),
+                                "z": types.Schema(type="NUMBER", description="Z height in mm. 0=table surface, default 1"),
+                                "arm": types.Schema(type="STRING", description="Which arm: 'left', 'right', or 'auto'"),
+                            },
+                            required=["x", "y"]
+                        )
+                    ),
+                    types.FunctionDeclaration(
+                        name="open_gripper",
+                        description="Open the gripper to release an object",
+                        parameters=types.Schema(
+                            type="OBJECT",
+                            properties={
+                                "arm": types.Schema(type="STRING", description="Which arm: 'left' or 'right'"),
+                            },
+                            required=["arm"]
+                        )
+                    ),
+                    types.FunctionDeclaration(
+                        name="close_gripper",
+                        description="Close the gripper to grasp an object",
+                        parameters=types.Schema(
+                            type="OBJECT",
+                            properties={
+                                "arm": types.Schema(type="STRING", description="Which arm: 'left' or 'right'"),
+                            },
+                            required=["arm"]
+                        )
+                    ),
+                    types.FunctionDeclaration(
+                        name="go_home",
+                        description="Move the robot arm to its home (resting) position",
+                        parameters=types.Schema(
+                            type="OBJECT",
+                            properties={
+                                "arm": types.Schema(type="STRING", description="Which arm: 'left', 'right', or 'both'"),
+                            },
+                            required=["arm"]
+                        )
+                    ),
+                ]
+            )
+
+            prompt = f"""You are a robot control planner.
+
+The user instruction is: "{instruction}"
+
+Analyze the image and create an execution plan using the available robot tools.
+
+## Coordinate System
+- Use image coordinates: x (0=left, 1000=right), y (0=top, 1000=bottom)
+- The image shows a top-down view of the robot workspace
+- Left arm handles the left half of the image (x < 500), Right arm handles the right half (x >= 500)
+- Identify object positions by looking at the image and specify their x,y location
+
+## Planning Rules
+- For pick-and-place tasks, follow this sequence:
+  1. open_gripper → 2. move_arm (to object) → 3. close_gripper → 4. move_arm (to destination) → 5. open_gripper → 6. go_home
+- move_arm does NOT affect the gripper. Gripper state is preserved during arm movement.
+- Do NOT skip steps. Call each tool function in order."""
+
+            response = self.client.models.generate_content(
+                model=self.model_name,
+                contents=[
+                    prompt,
+                    types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg")
+                ],
+                config=types.GenerateContentConfig(
+                    tools=[robot_tools],
+                    temperature=0.2
+                )
+            )
+
+            # Extract function calls from response
+            steps = []
+            for candidate in response.candidates:
+                for part in candidate.content.parts:
+                    if part.function_call:
+                        fc = part.function_call
+                        steps.append({
+                            "tool": fc.name,
+                            "args": dict(fc.args) if fc.args else {},
+                            "description": f"{fc.name}({', '.join(f'{k}={v}' for k, v in (fc.args or {}).items())})"
+                        })
+                    elif part.text:
+                        # Model returned text alongside or instead of function calls
+                        pass
+
+            if not steps:
+                return {
+                    "error": "Model did not generate any tool calls",
+                    "steps": [],
+                    "raw_text": response.text if hasattr(response, 'text') else ""
+                }
+
+            # Post-process: convert Gemini image coords (0-1000) to robot mm
+            steps = self._convert_gemini_coords(steps)
+
+            return {
+                "steps": steps,
+                "summary": instruction,
+                "step_count": len(steps)
+            }
+
+        except Exception as e:
+            print(f"Execute with tools error: {e}")
+            return {"error": str(e), "steps": []}
+
+    def _convert_gemini_coords(self, steps):
+        """Convert Gemini image coords (0-1000) to robot mm using calibration homography.
+        
+        For each move_arm step, converts x,y from Gemini's 0-1000 normalized
+        image coordinates to robot mm via the calibration homography matrix.
+        Also determines the correct arm based on the converted x coordinate.
+        """
+        from calibration_manager import get_calibration_for_role
+        from lib.coordinate_transform import gemini_to_robot
+
+        cal = get_calibration_for_role("TopView")
+        if not cal:
+            print("Warning: No TopView calibration data — skipping coordinate conversion")
+            return steps
+
+        H = cal.get("homography_matrix")
+        res = cal.get("resolution", {})
+        width = res.get("width", 1920)
+        height = res.get("height", 1080)
+
+        if not H:
+            print("Warning: No homography matrix — skipping coordinate conversion")
+            return steps
+
+        for step in steps:
+            if step["tool"] != "move_arm":
+                continue
+
+            args = step["args"]
+            gx = float(args.get("x", 500))
+            gy = float(args.get("y", 500))
+
+            robot = gemini_to_robot(gx, gy, H, width, height)
+            robot_x = round(robot["x"], 1)
+            robot_y = round(robot["y"], 1)
+
+            # Auto arm selection based on converted robot x
+            if args.get("arm") == "auto" or "arm" not in args:
+                args["arm"] = "left" if robot_x < 0 else "right"
+
+            print(f"  Coord convert: gemini({gx:.0f}, {gy:.0f}) -> robot({robot_x}, {robot_y}) arm={args['arm']}")
+
+            args["x"] = robot_x
+            args["y"] = robot_y
+
+            # Update description with converted coords
+            step["description"] = f"move_arm({', '.join(f'{k}={v}' for k, v in args.items())})"
+
+        return steps
+
 if __name__ == "__main__":
     # Simple test
     brain = GeminiBrain()
     print("Brain initialized. Key present:", bool(brain.api_key))
+

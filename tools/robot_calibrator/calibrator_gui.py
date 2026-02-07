@@ -129,6 +129,7 @@ class CalibratorGUI:
         self.actuation_range_vars = {}  # Motor actuation range (180/270)
         self.constrain_var = None  # Slider constraint toggle
         self.pulse_ref_labels = {}  # Pulse reference (pulse_min) display labels
+        self.z_offset_vars = {}  # Per-arm Z offset calibration
 
         # Position Presets UI variables
         self.vertex_indicators = {}    # {1-8: StringVar for ownership indicator}
@@ -257,6 +258,20 @@ class CalibratorGUI:
 
     def _create_arm_controls(self, parent, arm_key, slots):
         """Create control widgets for one arm with kinematics settings."""
+        # === Arm-level settings (Z Offset) ===
+        arm_header = ttk.Frame(parent)
+        arm_header.pack(fill=tk.X, pady=(0, 5))
+
+        ttk.Label(arm_header, text="Z Offset:").pack(side=tk.LEFT, padx=(5, 2))
+        z_val = self.manager.config.get(arm_key, {}).get("z_offset", 0)
+        z_offset_var = tk.StringVar(value=str(z_val))
+        self.z_offset_vars[arm_key] = z_offset_var
+        z_entry = ttk.Entry(arm_header, textvariable=z_offset_var, width=6)
+        z_entry.pack(side=tk.LEFT, padx=2)
+        z_entry.bind("<FocusOut>", lambda e, a=arm_key: self._on_z_offset_change(a))
+        z_entry.bind("<Return>", lambda e, a=arm_key: self._on_z_offset_change(a))
+        ttk.Label(arm_header, text="mm (table surface calibration)").pack(side=tk.LEFT)
+
         for i, slot in enumerate(slots):
             # Container for 2-row layout
             slot_container = ttk.Frame(parent)
@@ -778,6 +793,17 @@ class CalibratorGUI:
             # Invalid input, reset to saved value
             self.length_vars[(arm, slot)].set(str(self.manager.get_length(arm, slot)))
 
+    def _on_z_offset_change(self, arm):
+        """Handle Z offset entry change."""
+        val_str = self.z_offset_vars[arm].get()
+        try:
+            z_offset = float(val_str)
+            if arm in self.manager.config:
+                self.manager.config[arm]["z_offset"] = z_offset
+        except ValueError:
+            current = self.manager.config.get(arm, {}).get("z_offset", 0)
+            self.z_offset_vars[arm].set(str(current))
+
     def _on_range_change(self, arm, slot):
         """Handle actuation range dropdown change."""
         new_range = self.actuation_range_vars[(arm, slot)].get()
@@ -854,37 +880,63 @@ class CalibratorGUI:
             messagebox.showerror("Error", "Failed to save configuration")
 
     def _on_load_config(self):
-        """Reload configuration from file."""
+        """Reload configuration from file and refresh all UI variables."""
         self.manager.load_config()
 
-        # Update UI with loaded values
         for arm in ARM_NAMES:
-            for slot in range(1, NUM_SLOTS + 1):
-                self.channel_vars[(arm, slot)].set(self.manager.get_channel(arm, slot))
-                limits = self.manager.get_limits(arm, slot)
-                self.min_labels[(arm, slot)].set(str(limits["min"]))
-                self.max_labels[(arm, slot)].set(str(limits["max"]))
-                
-                # Update kinematics fields
-                loaded_type = self.manager.get_type(arm, slot)
-                self.type_vars[(arm, slot)].set(loaded_type)
-                
-                # Update min_pos options and value
-                combo = self.min_pos_combos[(arm, slot)]
-                combo['values'] = self._get_min_pos_options(loaded_type)
-                self.min_pos_vars[(arm, slot)].set(self.manager.get_min_pos(arm, slot))
-                
-                self.length_vars[(arm, slot)].set(str(self.manager.get_length(arm, slot)))
-                
-                # Update Pulse slider (Master)
-                initial_pulse = self.manager.get_initial_pulse(arm, slot)
-                self.pulse_vars[(arm, slot)].set(initial_pulse)
-                
-                # Update Angle display
-                initial_angle = self.manager.get_initial(arm, slot)
-                self.angle_vars[(arm, slot)].set(f"{initial_angle:.1f}")
+            # Refresh z_offset
+            if arm in self.z_offset_vars:
+                z_val = self.manager.config.get(arm, {}).get("z_offset", 0)
+                self.z_offset_vars[arm].set(str(z_val))
 
-        messagebox.showinfo("Success", "Configuration loaded")
+            # Refresh per-slot UI
+            for slot in range(1, NUM_SLOTS + 1):
+                slot_key = f"slot_{slot}"
+                motor_config = self.manager.config.get(arm, {}).get(slot_key, {})
+
+                # Channel
+                if (arm, slot) in self.channel_vars:
+                    self.channel_vars[(arm, slot)].set(self.manager.get_channel(arm, slot))
+
+                # Pulse (slider)
+                if (arm, slot) in self.pulse_vars:
+                    initial_pulse = self.manager.get_initial_pulse(arm, slot)
+                    if initial_pulse < 0:
+                        initial_pulse = 1500
+                    self.pulse_vars[(arm, slot)].set(initial_pulse)
+
+                # Angle display
+                if (arm, slot) in self.angle_vars:
+                    angle = self.pulse_mapper.pulse_to_angle(
+                        self.pulse_vars[(arm, slot)].get(), motor_config
+                    )
+                    self.angle_vars[(arm, slot)].set(f"{angle:.1f}")
+
+                # Min/Max limits
+                limits = self.manager.get_limits(arm, slot)
+                if (arm, slot) in self.min_labels:
+                    self.min_labels[(arm, slot)].set(str(limits["min"]))
+                if (arm, slot) in self.max_labels:
+                    self.max_labels[(arm, slot)].set(str(limits["max"]))
+
+                # Type, min_pos, length, range
+                if (arm, slot) in self.type_vars:
+                    self.type_vars[(arm, slot)].set(self.manager.get_type(arm, slot))
+                if (arm, slot) in self.min_pos_vars:
+                    self.min_pos_vars[(arm, slot)].set(self.manager.get_min_pos(arm, slot))
+                if (arm, slot) in self.length_vars:
+                    self.length_vars[(arm, slot)].set(str(self.manager.get_length(arm, slot)))
+                if (arm, slot) in self.actuation_range_vars:
+                    self.actuation_range_vars[(arm, slot)].set(self.manager.get_actuation_range(arm, slot))
+
+                # Pulse reference
+                if (arm, slot) in self.pulse_ref_labels:
+                    self.pulse_ref_labels[(arm, slot)].set(str(self.manager.get_pulse_min(arm, slot)))
+
+        messagebox.showinfo("Success", "Configuration reloaded")
+
+
+
 
     def _on_set_home(self):
         """Save current slider positions as home (initial) position for all joints."""
