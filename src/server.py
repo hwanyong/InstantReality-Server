@@ -1106,7 +1106,7 @@ def create_app():
     
     # Index redirect
     async def index_redirect(request):
-        raise web.HTTPFound('/robotics/scene.html')
+        raise web.HTTPFound('/robotics/index.html')
     
     app.router.add_get('/', index_redirect)
     

@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -7,6 +8,7 @@
     <meta name="description" content="AI-powered robot arm control interface using Gemini API">
     <link rel="stylesheet" href="styles.css">
 </head>
+
 <body>
     <div id="app">
         <!-- Header -->
@@ -24,11 +26,6 @@
                 <h2>📹 Camera View</h2>
                 <div class="video-container">
                     <canvas id="video-canvas" width="800" height="450"></canvas>
-                    <canvas id="ar-overlay" width="800" height="450"></canvas>
-                </div>
-                <div class="video-controls">
-                    <button id="capture-btn" class="btn">📷 Capture</button>
-                    <button id="clear-ar-btn" class="btn">🗑️ Clear AR</button>
                 </div>
             </section>
 
@@ -37,38 +34,9 @@
                 <!-- Prompt Input -->
                 <div class="control-card">
                     <h3>💬 Natural Language Command</h3>
-                    <textarea id="prompt-input" 
-                              placeholder="예: 빨간 펜을 집어줘&#10;Pick up the red pen"></textarea>
+                    <textarea id="prompt-input" placeholder="예: 빨간 펜을 집어줘&#10;Pick up the red pen"></textarea>
                     <button id="send-prompt-btn" class="btn-primary">🚀 Send to Gemini</button>
                     <div id="gemini-result" class="result-box"></div>
-                </div>
-
-                <!-- Manual Arm Selection (Read-only: AI decides) -->
-                <div class="control-card">
-                    <h3>🦾 Active Arm</h3>
-                    <div class="arm-indicator">
-                        <span id="arm-selection" class="arm-badge">-</span>
-                        <small>AI 자동 선택</small>
-                    </div>
-                </div>
-
-                <!-- Manual Joint Control -->
-                <div class="control-card">
-                    <h3>🎛️ Manual Control</h3>
-                    <div id="joint-sliders"></div>
-                    <button id="send-manual-btn" class="btn">▶️ Execute Manual</button>
-                </div>
-
-                <!-- IK Test -->
-                <div class="control-card">
-                    <h3>📐 IK Test</h3>
-                    <div class="ik-inputs">
-                        <label>X: <input type="number" id="ik-x" value="0" step="10"></label>
-                        <label>Y: <input type="number" id="ik-y" value="200" step="10"></label>
-                        <label>Z: <input type="number" id="ik-z" value="50" step="10"></label>
-                    </div>
-                    <button id="test-ik-btn" class="btn">📏 Calculate IK</button>
-                    <pre id="ik-result"></pre>
                 </div>
             </section>
         </main>
@@ -76,4 +44,5 @@
 
     <script type="module" src="app.mjs"></script>
 </body>
+
 </html>
