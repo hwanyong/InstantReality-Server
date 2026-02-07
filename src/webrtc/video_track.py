@@ -25,8 +25,9 @@ class OpenCVVideoCapture(VideoStreamTrack):
             # Send black frame when paused (saves bandwidth)
             frame_rgb = self._create_black_frame(16, 16)
         else:
-            # Normal: fetch from camera manager
-            high_res, frame_rgb = self.cam_thread.get_frames()
+            # Always fetch current camera instance (survives refresh_cameras)
+            cam = get_camera(self.camera_index)
+            high_res, frame_rgb = cam.get_frames()
             if frame_rgb is None:
                 frame_rgb = self._create_black_frame(16, 16)
         
@@ -38,7 +39,8 @@ class OpenCVVideoCapture(VideoStreamTrack):
 
     def get_latest_frame(self):
         """Returns the latest high-resolution frame (BGR) or None."""
-        high_res, _ = self.cam_thread.get_frames()
+        cam = get_camera(self.camera_index)
+        high_res, _ = cam.get_frames()
         return high_res
 
     def _create_black_frame(self, width, height):

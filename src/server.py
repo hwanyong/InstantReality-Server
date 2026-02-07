@@ -27,7 +27,7 @@ except ImportError:
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.camera_manager import get_camera, get_active_cameras, init_cameras, set_camera_focus, set_camera_exposure, set_camera_auto_exposure
+from src.camera_manager import get_camera, get_active_cameras, init_cameras, set_camera_focus, set_camera_exposure, set_camera_auto_exposure, on_camera_refresh
 from src.camera_mapping import get_index_by_role, get_available_devices, match_roles, assign_role, VALID_ROLES, save_camera_settings, get_all_settings, get_roi_config, save_roi_config
 from src.calibration_manager import get_calibration_for_role, save_calibration_for_role
 from src.ai_engine import GeminiBrain
@@ -52,6 +52,17 @@ ws_clients = set()  # WebSocket clients
 # MediaRelay for efficient multi-client streaming
 relay = MediaRelay() if WEBRTC_AVAILABLE else None
 source_tracks = {}  # {camera_index: OpenCVVideoCapture} - singleton per camera
+
+def invalidate_source_tracks():
+    """Clear stale source tracks after camera refresh.
+    Called by camera_manager.refresh_cameras() via callback."""
+    for track in source_tracks.values():
+        try:
+            track.stop()
+        except Exception as e:
+            logger.debug(f"Error stopping source track: {e}")
+    source_tracks.clear()
+    logger.info(f"Source tracks invalidated (camera refresh)")
 
 
 # =============================================================================
@@ -955,6 +966,9 @@ async def init_app():
     # Initialize Gemini brain
     brain = GeminiBrain()
     logger.info("Gemini brain initialized")
+    
+    # Register WebRTC cleanup on camera refresh
+    on_camera_refresh(invalidate_source_tracks)
     
     # =========================================================================
     # Phase 1: Initialize ALL physical cameras (not just role-mapped)

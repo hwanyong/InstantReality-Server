@@ -3,16 +3,17 @@
 // src/static/robotics/calibration.mjs
 // ─────────────────────────────────────────────────────────────────────────────
 
-import InstantReality from '/sdk/instant-reality.mjs'
 import { showToast, showSuccess, showError } from './lib/toast.mjs'
 import { computeHomography, applyHomography, isValidHomography, computeReprojectionError, pixelToRobot } from './transform.mjs'
+import { robotConnect, robotDisconnect, robotHome, robotZero, robotMoveTo, robotStatus, calculateIK, getServoConfig, getCalibrationGeometry } from './lib/robot-api.mjs'
+import { WebRTCHelper } from './lib/webrtc-helper.mjs'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Globals
 // ─────────────────────────────────────────────────────────────────────────────
 
 const API_BASE = ''
-let ir = null
+let webrtc = null
 // ROLES is now dynamically fetched from server (not hardcoded)
 let ROLES = []
 
@@ -42,28 +43,11 @@ const elements = {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function initWebRTC() {
-    ir = new InstantReality({ serverUrl: API_BASE })
+    webrtc = new WebRTCHelper()
 
-    // 1. Fetch role mapping from server FIRST (dynamic, not hardcoded)
-    try {
-        const roleMap = await ir.getRoles()
-        // Get only connected roles in defined order
-        const orderedRoles = ['TopView', 'QuarterView', 'RightRobot', 'LeftRobot']
-        ROLES = orderedRoles.filter(r => roleMap[r] && roleMap[r].connected)
-        console.log('Dynamic ROLES from server:', ROLES, roleMap)
-    } catch (err) {
-        console.error('Failed to fetch roles, using fallback:', err)
-        ROLES = ['TopView', 'QuarterView', 'RightRobot', 'LeftRobot']
-    }
-
-    ir.on('track', (track, index, roleName) => {
-        // roleName is now provided by server - trustworthy
-        const role = roleName || ROLES[index]
-        console.log(`Received track ${index}, mapped to role: ${role}`)
-
-        // Find correct video element by role
-        const roleIndex = ROLES.indexOf(role)
-
+    // Bind video tracks to camera elements by role
+    webrtc.on('track', (track, index, role) => {
+        const roleIndex = webrtc.roles.indexOf(role)
         if (roleIndex !== -1) {
             const video = elements.cameras[roleIndex]
             if (video) {
@@ -75,18 +59,11 @@ async function initWebRTC() {
         }
     })
 
-    ir.on('connected', () => {
-        console.log('WebRTC connected')
-        showSuccess('카메라 연결됨')
-    })
+    webrtc.on('connected', () => showSuccess('카메라 연결됨'))
+    webrtc.on('disconnected', () => showError('카메라 연결 끊김'))
 
-    ir.on('disconnected', () => {
-        console.log('WebRTC disconnected')
-        showError('카메라 연결 끊김')
-    })
-
-    // 2. Connect with dynamically fetched roles
-    await ir.connect({ roles: ROLES })
+    await webrtc.connect()
+    ROLES = webrtc.roles
 
     // Initialize pause buttons after connection
     initPauseButtons()
@@ -96,39 +73,19 @@ async function initWebRTC() {
 // Camera Pause (Per-Client) - Role Based
 // ─────────────────────────────────────────────────────────────────────────────
 
-const pausedRoles = new Set()
-
 async function toggleCameraPause(role) {
-    if (!ir || !ir.clientId) {
+    if (!webrtc || !webrtc.clientId) {
         showError('WebRTC 연결 필요')
         return
     }
 
-    const paused = !pausedRoles.has(role)
-
     try {
-        const res = await fetch(`${API_BASE}/pause_camera_client`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                client_id: ir.clientId,
-                role: role,
-                paused: paused
-            })
-        })
-
-        if (!res.ok) {
-            throw new Error(`HTTP ${res.status}`)
-        }
-
+        const paused = await webrtc.togglePause(role)
         if (paused) {
-            pausedRoles.add(role)
             showToast(`${role} 일시정지됨`)
         } else {
-            pausedRoles.delete(role)
             showToast(`${role} 재개됨`)
         }
-
         updatePauseButtonState(role)
     } catch (e) {
         console.error('Failed to toggle pause:', e)
@@ -140,7 +97,7 @@ function updatePauseButtonState(role) {
     const btn = document.querySelector(`.pause-btn[data-role="${role}"]`)
     if (!btn) return
 
-    if (pausedRoles.has(role)) {
+    if (webrtc.isRolePaused(role)) {
         btn.classList.add('paused')
         btn.textContent = '▶'
         btn.title = '재생'
@@ -253,27 +210,7 @@ const overlayState = {
 const DEFAULT_Z = 5       // mm - height above ground
 const DEFAULT_SPEED = 2   // seconds
 
-// Calculate IK using server API (Single Source of Truth)
-// Server handles: World→Local conversion, Reach, θ1~θ4
-async function calculateIK(worldX, worldY, arm) {
-    try {
-        const res = await fetch(`${API_BASE}/api/ik/calculate`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ world_x: worldX, world_y: worldY, z: 3, arm })
-        })
-
-        if (!res.ok) {
-            console.error('IK API error:', res.status)
-            return null
-        }
-
-        return await res.json()
-    } catch (err) {
-        console.error('IK API fetch error:', err)
-        return null
-    }
-}
+// calculateIK is now imported from lib/robot-api.mjs
 
 const SVG_NS = 'http://www.w3.org/2000/svg'
 const VERTEX_RADIUS = 8
@@ -657,9 +594,7 @@ function normalizeRobotCoord(robotPoint) {
  */
 async function fetchGeometry() {
     try {
-        const res = await fetch(`${API_BASE}/api/calibration/geometry`)
-        if (!res.ok) throw new Error(`HTTP ${res.status}`)
-        const data = await res.json()
+        const data = await getCalibrationGeometry()
         overlayState.robotGeometry = data
         return data
     } catch (e) {
@@ -890,19 +825,7 @@ async function addTestMarker(pixelCoords, robotCoords) {
 
     // Call move_to API to actually move the robot
     try {
-        const moveRes = await fetch('/api/robot/move_to', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                x: robotCoords.x,
-                y: robotCoords.y,
-                z: 5,  // Default Z height
-                arm: robotCoords.arm,
-                motion_time: motionTime
-            })
-        })
-
-        const moveData = await moveRes.json()
+        const moveData = await robotMoveTo(robotCoords.x, robotCoords.y, 5, robotCoords.arm, motionTime)
 
         if (moveData.success) {
             showToast(`🤖 이동 중... (${motionTime}s)`)
@@ -1271,11 +1194,7 @@ let servoConfig = null
 
 async function loadServoConfig() {
     try {
-        const res = await fetch(`${API_BASE}/api/servo_config`)
-        if (!res.ok) {
-            throw new Error(`HTTP ${res.status}`)
-        }
-        servoConfig = await res.json()
+        servoConfig = await getServoConfig()
         updateJsonPreview()
         console.log('Servo config loaded')
         return servoConfig
@@ -1326,8 +1245,7 @@ function initRobotControl() {
         statusSpan.textContent = 'Connecting...'
 
         try {
-            const res = await fetch('/api/robot/connect', { method: 'POST' })
-            const data = await res.json()
+            const data = await robotConnect()
 
             if (data.success) {
                 statusSpan.textContent = 'Connected'
@@ -1350,7 +1268,7 @@ function initRobotControl() {
     // Disconnect button
     disconnectBtn.addEventListener('click', async () => {
         try {
-            await fetch('/api/robot/disconnect', { method: 'POST' })
+            await robotDisconnect()
             statusSpan.textContent = 'Disconnected'
             statusSpan.className = 'robot-status-inline'
             disconnectBtn.disabled = true
@@ -1369,12 +1287,7 @@ function initRobotControl() {
         homeBtn.textContent = '🏠 Moving...'
 
         try {
-            const res = await fetch('/api/robot/home', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ motion_time: motionTime })
-            })
-            const data = await res.json()
+            const data = await robotHome(motionTime)
 
             if (data.success) {
                 console.log('Home position reached')
@@ -1396,12 +1309,7 @@ function initRobotControl() {
         zeroBtn.textContent = '📐 Moving...'
 
         try {
-            const res = await fetch('/api/robot/zero', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ motion_time: motionTime })
-            })
-            const data = await res.json()
+            const data = await robotZero(motionTime)
 
             if (data.success) {
                 console.log('Zero position reached')
@@ -1422,8 +1330,7 @@ function initRobotControl() {
 
 async function fetchRobotStatus() {
     try {
-        const res = await fetch('/api/robot/status')
-        const data = await res.json()
+        const data = await robotStatus()
 
         if (data.success && data.status) {
             const isConnected = data.status.connected

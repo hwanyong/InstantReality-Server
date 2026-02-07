@@ -3,15 +3,15 @@
 // src/static/robotics/scene.mjs
 // ─────────────────────────────────────────────────────────────────────────────
 
-import InstantReality from '/sdk/instant-reality.mjs'
 import { showToast, showSuccess, showError } from './lib/toast.mjs'
+import { WebRTCHelper } from './lib/webrtc-helper.mjs'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Globals
 // ─────────────────────────────────────────────────────────────────────────────
 
 const API_BASE = ''
-let ir = null
+let webrtc = null
 const ROLES = ['TopView', 'QuarterView']
 
 // Canvas elements
@@ -37,24 +37,22 @@ let videoElements = new Map() // Store video elements for each track
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function initWebRTC() {
-    ir = new InstantReality({ serverUrl: API_BASE })
+    webrtc = new WebRTCHelper({ roleOrder: ROLES })
 
-    ir.on('track', (track, index) => {
-        console.log(`Received track ${index} for ${ROLES[index]}`)
+    webrtc.on('track', (track, index, role) => {
+        console.log(`Received track ${index} for ${role}`)
         setupVideoForCanvas(track, index)
     })
 
-    ir.on('connected', () => {
-        console.log('WebRTC connected')
+    webrtc.on('connected', () => {
         scanStatus.textContent = '● Connected'
     })
 
-    ir.on('disconnected', () => {
-        console.log('WebRTC disconnected')
+    webrtc.on('disconnected', () => {
         scanStatus.textContent = '● Disconnected'
     })
 
-    await ir.connect({ roles: ROLES })
+    await webrtc.connect({ fetchRoles: false, roles: ROLES })
 }
 
 function setupVideoForCanvas(track, index) {

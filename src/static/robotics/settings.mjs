@@ -4,6 +4,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { showToast, showSuccess, showError } from './lib/toast.mjs'
+import { WebSocketHelper } from './lib/websocket-helper.mjs'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Globals
@@ -26,41 +27,13 @@ const cameraGrid = document.getElementById('cameraGrid')
 // WebSocket for Real-time Camera Updates
 // ─────────────────────────────────────────────────────────────────────────────
 
-let ws = null
-
-function connectWebSocket() {
-    const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
-    ws = new WebSocket(`${protocol}//${location.host}/ws`)
-
-    ws.onopen = () => {
-        console.log('WebSocket connected for camera updates')
-    }
-
-    ws.onmessage = (event) => {
-        try {
-            const data = JSON.parse(event.data)
-            if (data.type === 'camera_change') {
-                console.log('Camera change detected:', data.cameras)
-                showToast('카메라 변경 감지됨 - 새로고침 중...')
-                scanCameras()  // Auto-refresh camera grid
-            }
-        } catch (err) {
-            console.error('WebSocket message parse error:', err)
-        }
-    }
-
-    ws.onclose = () => {
-        console.log('WebSocket disconnected, reconnecting in 3s...')
-        setTimeout(connectWebSocket, 3000)
-    }
-
-    ws.onerror = (err) => {
-        console.error('WebSocket error:', err)
-    }
-}
-
-// Initialize WebSocket connection
-connectWebSocket()
+const ws = new WebSocketHelper()
+ws.on('camera_change', (data) => {
+    console.log('Camera change detected:', data.cameras)
+    showToast('카메라 변경 감지됨 - 새로고침 중...')
+    scanCameras()
+})
+ws.connect()
 
 
 // ─────────────────────────────────────────────────────────────────────────────
