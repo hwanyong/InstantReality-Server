@@ -1,0 +1,72 @@
+[
+    {
+        "label": "White_Dice",
+        "z_mm": 0,
+        "rotation": 45,
+        "unique_id": "White_Dice_0",
+        "point": [
+            549,
+            640
+        ]
+    },
+    {
+        "label": "Orange_Dice",
+        "z_mm": 0,
+        "rotation": 0,
+        "unique_id": "Orange_Dice_0",
+        "point": [
+            619,
+            480
+        ]
+    },
+    {
+        "label": "Yellow_Dice",
+        "z_mm": 0,
+        "rotation": 30,
+        "unique_id": "Yellow_Dice_0",
+        "point": [
+            434,
+            483
+        ]
+    },
+    {
+        "label": "Blue_Dice",
+        "z_mm": 0,
+        "rotation": 10,
+        "unique_id": "Blue_Dice_0",
+        "point": [
+            665,
+            396
+        ]
+    },
+    {
+        "label": "Green_Dice",
+        "z_mm": 0,
+        "rotation": 0,
+        "unique_id": "Green_Dice_0",
+        "point": [
+            619,
+            372
+        ]
+    },
+    {
+        "label": "Pink_Dice",
+        "z_mm": 0,
+        "rotation": 45,
+        "unique_id": "Pink_Dice_0",
+        "point": [
+            453,
+            372
+        ]
+    },
+    {
+        "label": "Red_Dice",
+        "z_mm": 0,
+        "rotation": 0,
+        "unique_id": "Red_Dice_0",
+        "point": [
+            140,
+            383
+        ]
+    }
+]

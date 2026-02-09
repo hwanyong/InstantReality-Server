@@ -1,0 +1,47 @@
+[
+    {
+        "label": "Green_Dice",
+        "z_mm": 0,
+        "rotation": 45
+    },
+    {
+        "label": "Orange_Dice",
+        "z_mm": 0,
+        "rotation": 45
+    },
+    {
+        "label": "Pink_Dice",
+        "z_mm": 0,
+        "rotation": 15
+    },
+    {
+        "label": "Yellow_Dice",
+        "z_mm": 0,
+        "rotation": 15
+    },
+    {
+        "label": "Blue_Dice",
+        "z_mm": 0,
+        "rotation": 45
+    },
+    {
+        "label": "Red_Dice",
+        "z_mm": 0,
+        "rotation": 45
+    },
+    {
+        "label": "Yellow_Dice",
+        "z_mm": 0,
+        "rotation": 45
+    },
+    {
+        "label": "Red_Dice",
+        "z_mm": 0,
+        "rotation": 45
+    },
+    {
+        "label": "White_Dice",
+        "z_mm": 0,
+        "rotation": 45
+    }
+]
