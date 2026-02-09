@@ -32,6 +32,7 @@ from src.camera_mapping import get_index_by_role, get_available_devices, match_r
 from src.calibration_manager import get_calibration_for_role, save_calibration_for_role
 from src.ai_engine import GeminiBrain
 import robot_api
+from lib.connection_logger import log_webrtc_connect, log_webrtc_disconnect, log_ws_connect, log_ws_disconnect, log_stream_start, log_stream_end
 
 if WEBRTC_AVAILABLE:
     from src.webrtc.video_track import OpenCVVideoCapture, BlackVideoTrack
@@ -538,6 +539,7 @@ async def handle_cameras_settings_save(request):
 async def handle_stream(request):
     """GET /api/stream/{camera} - MJPEG stream for live preview"""
     camera_index = int(request.match_info.get('camera', 0))
+    log_stream_start(request, camera_index)
     cam = get_camera(camera_index)
     
     if cam is None:
@@ -571,6 +573,7 @@ async def handle_stream(request):
             await asyncio.sleep(0.033)  # ~30fps
     except (asyncio.CancelledError, ConnectionResetError, Exception) as e:
         # Client disconnected - this is normal behavior
+        log_stream_end(request, camera_index)
         if not isinstance(e, (asyncio.CancelledError, ConnectionResetError)):
             logger.debug(f"Stream ended: {type(e).__name__}")
     
@@ -915,11 +918,13 @@ async def handle_offer(request):
     active_tracks[pc_id] = {}
     
     logger.info(f"New WebRTC connection: {pc_id}, roles: {requested_roles}")
+    log_webrtc_connect(request, pc_id, requested_roles)
     
     @pc.on("connectionstatechange")
     async def on_connectionstatechange():
         logger.info(f"Connection state: {pc.connectionState}")
         if pc.connectionState == "failed" or pc.connectionState == "closed":
+            log_webrtc_disconnect(pc_id)
             await pc.close()
             pcs.discard(pc)
             active_tracks.pop(pc_id, None)
@@ -999,6 +1004,7 @@ async def handle_websocket(request):
     await ws.prepare(request)
     ws_clients.add(ws)
     logger.info(f"WebSocket client connected. Total: {len(ws_clients)}")
+    log_ws_connect(request)
     
     try:
         async for msg in ws:
@@ -1006,6 +1012,7 @@ async def handle_websocket(request):
     finally:
         ws_clients.discard(ws)
         logger.info(f"WebSocket client disconnected. Total: {len(ws_clients)}")
+        log_ws_disconnect(request)
     
     return ws
 

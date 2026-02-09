@@ -181,4 +181,5 @@ cython_debug/
 
 # Project specific
 captures/
+logs/
 .DS_Store
