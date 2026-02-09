@@ -1193,9 +1193,24 @@ async def init_app():
     asyncio.create_task(start_camera_polling())
 
 
+@web.middleware
+async def sdk_cors_middleware(request, handler):
+    if request.path.startswith('/sdk/'):
+        if request.method == 'OPTIONS':
+            return web.Response(headers={
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Allow-Methods': 'GET, OPTIONS',
+                'Access-Control-Allow-Headers': '*',
+            })
+        response = await handler(request)
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        return response
+    return await handler(request)
+
+
 def create_app():
     """Create and configure the aiohttp application"""
-    app = web.Application()
+    app = web.Application(middlewares=[sdk_cors_middleware])
     
     # Setup CORS
     cors = aiohttp_cors.setup(app, defaults={
