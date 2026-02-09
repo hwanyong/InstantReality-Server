@@ -1,0 +1,53 @@
+{
+    "timestamp": 1770550262.377944,
+    "objects": [
+        {
+            "id": "Red_Dice_0",
+            "type": "dice",
+            "properties": {
+                "color": "red"
+            },
+            "transform": {
+                "position": {
+                    "x": 83.7,
+                    "y": 10,
+                    "z": 70.6
+                },
+                "rotation": {
+                    "x": 0,
+                    "y": 0,
+                    "z": 0
+                },
+                "scale": {
+                    "x": 1,
+                    "y": 1,
+                    "z": 1
+                }
+            }
+        },
+        {
+            "id": "White_Dice_0",
+            "type": "dice",
+            "properties": {
+                "color": "white"
+            },
+            "transform": {
+                "position": {
+                    "x": 78.0,
+                    "y": 10,
+                    "z": 79.4
+                },
+                "rotation": {
+                    "x": 0,
+                    "y": 45,
+                    "z": 0
+                },
+                "scale": {
+                    "x": 1,
+                    "y": 1,
+                    "z": 1
+                }
+            }
+        }
+    ]
+}
