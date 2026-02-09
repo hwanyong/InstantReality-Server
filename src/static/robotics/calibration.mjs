@@ -410,10 +410,12 @@ function renderOverlay() {
 
 // Handle SVG background click (add vertex only - base/share are auto-calculated)
 function handleSVGClick(e) {
-    // In test mode, allow clicks on vertices to pass through for test marker placement
+    // Always ignore clicks on test markers (let their own click handler show detail popup)
+    if (e.target.closest('.test-marker')) return
+
+    // In normal mode, ignore clicks on existing elements
     if (!overlayState.testModeActive) {
-        // Ignore if clicking on existing element (including test markers)
-        if (e.target.closest('.vertex') || e.target.closest('.marker') || e.target.closest('.delete-btn') || e.target.closest('.test-marker')) {
+        if (e.target.closest('.vertex') || e.target.closest('.marker') || e.target.closest('.delete-btn')) {
             return
         }
     }

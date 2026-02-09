@@ -765,7 +765,7 @@ async def handle_ik_calculate(request):
         arm = data.get("arm", "right_arm")
         
         # Load servo config
-        config_path = Path(__file__).parent.parent / "tools" / "robot_calibrator" / "servo_config.json"
+        config_path = PROJECT_ROOT / "servo_config.json"
         if not config_path.exists():
             return web.json_response({"error": "servo_config.json not found"}, status=500)
         
