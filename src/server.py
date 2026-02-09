@@ -28,7 +28,7 @@ PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.camera_manager import get_camera, get_active_cameras, init_cameras, set_camera_focus, set_camera_exposure, set_camera_auto_exposure, on_camera_refresh
-from src.camera_mapping import get_index_by_role, get_available_devices, match_roles, assign_role, VALID_ROLES, save_camera_settings, get_all_settings, get_roi_config, save_roi_config
+from src.camera_mapping import get_index_by_role, get_available_devices, match_roles, assign_role, VALID_ROLES, save_camera_settings, get_all_settings, get_roi_config, save_roi_config, invalidate_role_cache
 from src.calibration_manager import get_calibration_for_role, save_calibration_for_role
 from src.ai_engine import GeminiBrain
 import robot_api
@@ -268,7 +268,7 @@ async def handle_gemini_analyze(request):
         return web.json_response({"error": "Failed to capture frame"}, status=500)
     
     # Call Gemini Brain
-    result = brain.analyze_frame(frame_bgr, instruction)
+    result = await asyncio.to_thread(brain.analyze_frame, frame_bgr, instruction)
     
     return web.json_response(result)
 
@@ -300,9 +300,102 @@ async def handle_gemini_execute(request):
         return web.json_response({"error": "Failed to capture frame"}, status=500)
     
     # Generate execution plan via Function Calling
-    plan = brain.execute_with_tools(frame_bgr, instruction)
+    plan = await asyncio.to_thread(brain.execute_with_tools, frame_bgr, instruction)
     
     return web.json_response(plan)
+
+
+async def handle_verify(request):
+    """POST /api/robot/verify
+    Verify robot action using arm-mounted camera.
+    Uses cached role→index mapping + get_camera() to avoid USB re-scan.
+
+    Body: { arm: "right"|"left", step_type: "move_arm"|"gripper", context: "..." }
+    """
+    if not request.body_exists:
+        return web.json_response({"verified": False, "description": "Missing body"}, status=400)
+
+    data = await request.json()
+    arm = data.get("arm", "right")
+    step_type = data.get("step_type", "move_arm")
+    context = data.get("context", "")
+
+    role_map = {"right": "RightRobot", "left": "LeftRobot"}
+    role = role_map.get(arm)
+    if not role:
+        return web.json_response({"verified": False, "description": f"Unknown arm: {arm}"}, status=400)
+
+    # Get camera index (cached — no USB scan)
+    idx = get_index_by_role(role)
+    if idx is None:
+        return web.json_response({
+            "verified": True,
+            "description": f"Camera {role} not available, skipping verification"
+        })
+
+    # Get frame from cached camera (no USB scan)
+    try:
+        cam = get_camera(idx)
+        frame_bgr, _ = cam.get_frames()
+        if frame_bgr is None:
+            return web.json_response({
+                "verified": True,
+                "description": "No frame captured, skipping verification"
+            })
+    except Exception as e:
+        return web.json_response({
+            "verified": True,
+            "description": f"Camera error: {e}, skipping verification"
+        })
+
+    # Call AI verification using existing brain singleton
+    try:
+        result = await asyncio.to_thread(brain.verify_action, frame_bgr, step_type, context)
+
+        # Apply gripper-camera offset compensation
+        if step_type == "move_arm" and result.get("offset"):
+            from calibration_manager import get_gripper_offsets
+            offsets = get_gripper_offsets()
+            arm_offset = offsets.get(arm, {"dx": 0, "dy": 0})
+            raw_dx = result["offset"].get("dx", 0)
+            raw_dy = result["offset"].get("dy", 0)
+            result["offset"]["dx"] = raw_dx + arm_offset.get("dx", 0)
+            result["offset"]["dy"] = raw_dy + arm_offset.get("dy", 0)
+            logger.info(f"[VERIFY] Gripper offset applied: raw({raw_dx},{raw_dy}) + cam({arm_offset}) = ({result['offset']['dx']},{result['offset']['dy']})")
+
+        return web.json_response(result)
+    except Exception as e:
+        return web.json_response({
+            "verified": True,
+            "description": f"AI error: {e}, skipping verification"
+        })
+
+async def handle_coord_convert(request):
+    """POST /api/coord/convert - Convert Gemini 0-1000 coords to robot mm.
+
+    Body: { "gx": 600, "gy": 550 }
+    Response: { "x": 65.1, "y": -9.5, "arm": "right" }
+    """
+    data = await request.json()
+    gx = float(data.get("gx", 500))
+    gy = float(data.get("gy", 500))
+
+    from calibration_manager import get_calibration_for_role
+    from lib.coordinate_transform import gemini_to_robot
+
+    cal = get_calibration_for_role("TopView")
+    if not cal or not cal.get("homography_matrix"):
+        return web.json_response({"error": "No TopView calibration"}, status=400)
+
+    H = cal["homography_matrix"]
+    res = cal.get("resolution", {})
+    robot = gemini_to_robot(gx, gy, H, res.get("width", 1920), res.get("height", 1080))
+    rx = round(robot["x"], 1)
+    ry = round(robot["y"], 1)
+    arm = "left" if rx < 0 else "right"
+
+    return web.json_response({"x": rx, "y": ry, "arm": arm})
+
 
 # =============================================================================
 # Camera Management API
@@ -310,6 +403,7 @@ async def handle_gemini_execute(request):
 
 async def handle_cameras_scan(request):
     """POST /api/cameras/scan - Scan for connected cameras"""
+    invalidate_role_cache()
     devices = get_available_devices()
     roles = match_roles(devices)
     
@@ -334,6 +428,7 @@ async def handle_cameras_assign(request):
     
     try:
         assign_role(device_path, role_name)
+        invalidate_role_cache()
         return web.json_response({
             "success": True,
             "device_path": device_path,
@@ -1117,6 +1212,8 @@ def create_app():
         # Gemini API
         web.post('/api/gemini/analyze', handle_gemini_analyze),
         web.post('/api/gemini/execute', handle_gemini_execute),
+        web.post('/api/robot/verify', handle_verify),
+        web.post('/api/coord/convert', handle_coord_convert),
         # Camera Management API
         web.post('/api/cameras/scan', handle_cameras_scan),
         web.post('/api/cameras/assign', handle_cameras_assign),

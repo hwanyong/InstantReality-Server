@@ -68,3 +68,16 @@ def delete_calibration_for_role(role_name):
         save_calibration(data)
         return True
     return False
+
+
+def get_gripper_offsets():
+    """
+    Get gripper-camera offset per arm (mm, in camera image coordinates).
+    Returns dict: {"right": {"dx": 0, "dy": 0}, "left": {"dx": 0, "dy": 0}}
+    """
+    data = load_calibration()
+    return data.get("gripper_offsets", {
+        "right": {"dx": 0, "dy": 0},
+        "left": {"dx": 0, "dy": 0}
+    })
+

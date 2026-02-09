@@ -14,6 +14,7 @@ import { WebRTCHelper } from './lib/webrtc-helper.mjs'
 
 const API_BASE = ''
 const SAFE_HEIGHT = 50  // mm above table for safe approach/ascend
+const MAX_VERIFY_RETRIES = 3  // max correction attempts per step
 const SVG_NS = 'http://www.w3.org/2000/svg'
 
 // Original camera resolution (server capture size) — Master Scale Alignment
@@ -506,6 +507,11 @@ async function runPlan() {
             const result = await executeStep(step)
 
             if (result.success !== false) {
+                // Verify step via arm camera
+                const verifyResult = await _verifyStep(step, result)
+                if (verifyResult.aborted) {
+                    showToast(`⚠️ Step ${i + 1} 검증 실패, 다음 스텝 진행`)
+                }
                 updateStepStatus(i, 'done')
             } else {
                 updateStepStatus(i, 'error')
@@ -553,13 +559,132 @@ async function abortPlan() {
 // Safe approach motion state
 let lastMoveArgs = null
 
-async function _moveTo(x, y, z, arm, motionTime) {
+async function _moveTo(x, y, z, arm, motionTime, orientation = null) {
+    const body = { x, y, z, arm, motion_time: motionTime }
+    if (orientation != null) body.orientation = orientation
     const res = await fetch(`${API_BASE}/api/robot/move_to`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ x, y, z, arm, motion_time: motionTime })
+        body: JSON.stringify(body)
     })
     return await res.json()
+}
+
+async function _verifyStep(step, result) {
+    const tool = step.tool
+    const args = step.args || {}
+
+    // Only verify move_arm and close_gripper (open_gripper needs no verification)
+    if (tool != 'move_arm' && tool != 'close_gripper') {
+        return { aborted: false }
+    }
+
+    const arm = args.arm || lastMoveArgs?.arm || 'right'
+    const stepType = tool == 'move_arm' ? 'move_arm' : 'gripper'
+    const context = step.description || tool
+
+    for (let retry = 0; retry < MAX_VERIFY_RETRIES; retry++) {
+        showToast(`🔍 검증 중... (${retry + 1}/${MAX_VERIFY_RETRIES})`)
+
+        try {
+            const res = await fetch(`${API_BASE}/api/robot/verify`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ arm, step_type: stepType, context })
+            })
+            const vResult = await res.json()
+
+            if (vResult.verified) {
+                showToast(`✅ 검증 통과: ${vResult.description || 'OK'}`)
+                return { aborted: false }
+            }
+
+            showToast(`⚠️ 검증 실패: ${vResult.description || 'Unknown'}`)
+
+            // Position correction — rotate camera offset to robot coordinates
+            if (stepType == 'move_arm' && vResult.offset) {
+                const dx = vResult.offset.dx || 0
+                const dy = vResult.offset.dy || 0
+                // Tolerance: ignore offsets < 3mm
+                const offsetMag = Math.sqrt(dx * dx + dy * dy)
+                if (offsetMag < 3.0) {
+                    showToast(`✅ 허용 범위 내 (${offsetMag.toFixed(1)}mm)`)
+                    return { aborted: false }
+                }
+                // Camera-to-robot 2D rotation by -yaw + damping
+                const DAMPING = 0.5
+                const yawRad = -(lastMoveArgs?.yaw || 0) * Math.PI / 180
+                const robotDx = (dx * Math.cos(yawRad) - dy * Math.sin(yawRad)) * DAMPING
+                const robotDy = (dx * Math.sin(yawRad) + dy * Math.cos(yawRad)) * DAMPING
+                const newX = (lastMoveArgs?.x || 0) + robotDx
+                const newY = (lastMoveArgs?.y || 0) + robotDy
+                showToast(`🔧 위치 보정: cam(${dx},${dy}) → robot(${robotDx.toFixed(1)},${robotDy.toFixed(1)})`)
+                const corrRes = await _moveTo(newX, newY, args.z ?? 1, arm, 1.0)
+                lastMoveArgs = { x: newX, y: newY, arm, yaw: corrRes.yaw_deg || lastMoveArgs?.yaw || 0 }
+                continue  // re-verify
+            }
+
+            // Gripper grasp retry: open → ascend → re-analyze → re-position → close
+            if (stepType == 'gripper' && !vResult.verified) {
+                const arm = args.arm || lastMoveArgs?.arm || 'right'
+                showToast(`🔄 그립 실패 — 재시도 (${retry + 1}/${MAX_VERIFY_RETRIES})`)
+
+                // 1. Re-open gripper
+                await executeStep({ tool: 'open_gripper', args: { arm } })
+
+                // 2. Ascend to safe height
+                if (lastMoveArgs) {
+                    await _moveTo(lastMoveArgs.x, lastMoveArgs.y, SAFE_HEIGHT, arm, 1.0)
+                }
+
+                // 3. Re-analyze object via TopView
+                const aRes = await fetch(`${API_BASE}/api/gemini/analyze`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ instruction: context })
+                })
+                const analysis = await aRes.json()
+
+                if (!analysis.coordinates || !analysis.target_detected) {
+                    showToast('❌ 물체 재탐지 실패')
+                    continue
+                }
+
+                // 4. Convert Gemini 0-1000 coords to robot mm
+                const [gy, gx] = analysis.coordinates
+                const cRes = await fetch(`${API_BASE}/api/coord/convert`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ gx, gy })
+                })
+                const coord = await cRes.json()
+
+                if (coord.error) {
+                    showToast(`❌ 좌표 변환 실패: ${coord.error}`)
+                    continue
+                }
+
+                showToast(`🎯 재위치: (${coord.x}, ${coord.y}) arm=${coord.arm}`)
+
+                // 5. Re-position (approach + descend)
+                await _moveTo(coord.x, coord.y, SAFE_HEIGHT, coord.arm, 1.0)
+                const descRes = await _moveTo(coord.x, coord.y, args.z ?? 1, coord.arm, 1.5)
+                lastMoveArgs = { x: coord.x, y: coord.y, arm: coord.arm, yaw: descRes.yaw_deg || 0 }
+
+                // 6. Close gripper again
+                await executeStep({ tool: 'close_gripper', args: { arm: coord.arm } })
+                continue  // re-verify
+            }
+
+            // No correction available
+            return { aborted: false }
+        } catch (e) {
+            console.error('Verify error:', e)
+            return { aborted: false }  // Network error, skip verification
+        }
+    }
+
+    return { aborted: true }  // Exceeded retries
 }
 
 async function executeStep(step) {
@@ -572,6 +697,7 @@ async function executeStep(step) {
         const targetZ = args.z ?? 1
         const arm = args.arm || 'auto'
         const motionTime = args.motion_time || 2.0
+        const orientation = args.orientation ?? null
 
         // Phase 0: Ascend from previous position (if any)
         if (lastMoveArgs) {
@@ -583,11 +709,11 @@ async function executeStep(step) {
         const approachRes = await _moveTo(targetX, targetY, SAFE_HEIGHT, arm, 1.0)
         if (approachRes.success === false) return approachRes
 
-        // Phase 2: Descend — lower to target Z
-        const descendRes = await _moveTo(targetX, targetY, targetZ, arm, motionTime)
+        // Phase 2: Descend — lower to target Z (with orientation for gripper alignment)
+        const descendRes = await _moveTo(targetX, targetY, targetZ, arm, motionTime, orientation)
 
-        // Track position for next ascend
-        lastMoveArgs = { x: targetX, y: targetY, arm }
+        // Track position + yaw for next ascend and verification
+        lastMoveArgs = { x: targetX, y: targetY, arm, yaw: descendRes.yaw_deg || 0 }
 
         return descendRes
     }
@@ -611,6 +737,12 @@ async function executeStep(step) {
     }
 
     if (tool == 'go_home') {
+        // Safety: ascend before homing to avoid dragging across table
+        if (lastMoveArgs) {
+            await _moveTo(lastMoveArgs.x, lastMoveArgs.y, SAFE_HEIGHT, lastMoveArgs.arm, 1.0)
+            lastMoveArgs = null
+        }
+
         const res = await fetch(`${API_BASE}/api/robot/home`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },

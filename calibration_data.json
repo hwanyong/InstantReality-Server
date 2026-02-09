@@ -61,5 +61,15 @@
     },
     "reprojection_error": 2.990098375149723e-26,
     "is_valid": true
+  },
+  "gripper_offsets": {
+    "right": {
+      "dx": 0,
+      "dy": 0
+    },
+    "left": {
+      "dx": 0,
+      "dy": 0
+    }
   }
 }

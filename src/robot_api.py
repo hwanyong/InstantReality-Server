@@ -173,6 +173,7 @@ async def handle_move_to(request):
     z = data.get("z", 1.0)
     arm = data.get("arm", "auto")
     motion_time = data.get("motion_time", 2.0)
+    orientation = data.get("orientation", None)
     
     # Auto arm selection: x < 0 -> left, x >= 0 -> right
     if arm == "auto":
@@ -239,8 +240,8 @@ async def handle_move_to(request):
     max_reach = a2 + a3
     min_reach = abs(a2 - a3)
     
-    # Fixed angles for Slot 5, 6
-    theta5 = 0.0
+    # Slot 5 (Wrist Roll): apply object orientation if provided
+    theta5 = float(orientation) if orientation is not None else 0.0
     theta6 = 0.0
     
     is_valid = True
@@ -309,6 +310,7 @@ async def handle_move_to(request):
     return web.json_response({
         "success": success,
         "arm": arm,
+        "yaw_deg": round(theta1, 2),
         "target": {"x": x, "y": y, "z": z},
         "motion_time": motion_time,
         "valid": is_valid,

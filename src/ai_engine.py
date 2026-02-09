@@ -112,11 +112,8 @@ class GeminiBrain:
             return {"error": "AI not initialized (Missing API Key). Please set GEMINI_API_KEY."}
 
         try:
-            # 1. Convert BGR to RGB (Gemini expects RGB)
-            frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
-            
-            # 2. Encode to JPEG bytes
-            success, buffer = cv2.imencode(".jpg", frame_rgb)
+            # 1. Encode to JPEG bytes (cv2.imencode expects BGR — no conversion needed)
+            success, buffer = cv2.imencode(".jpg", frame_bgr)
             if not success:
                 return {"error": "Failed to encode image"}
             
@@ -160,9 +157,8 @@ class GeminiBrain:
             return {"error": str(e)}
 
     def _encode_frame(self, frame_bgr):
-        """Convert BGR frame to JPEG bytes for Gemini API"""
-        frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
-        success, buffer = cv2.imencode(".jpg", frame_rgb)
+        # cv2.imencode expects BGR — no conversion needed
+        success, buffer = cv2.imencode(".jpg", frame_bgr)
         if not success:
             return None
         return buffer.tobytes()
@@ -432,6 +428,7 @@ Rules:
                                 "y": types.Schema(type="NUMBER", description="Y position in image (0=top edge, 1000=bottom edge)"),
                                 "z": types.Schema(type="NUMBER", description="Z height in mm. 0=table surface, default 1"),
                                 "arm": types.Schema(type="STRING", description="Which arm: 'left', 'right', or 'auto'"),
+                                "orientation": types.Schema(type="NUMBER", description="Object edge angle in degrees (0-90). 0=edge aligned with image X-axis. Helps gripper align to object edges for optimal grasp."),
                             },
                             required=["x", "y"]
                         )
@@ -488,7 +485,13 @@ Analyze the image and create an execution plan using the available robot tools.
 - For pick-and-place tasks, follow this sequence:
   1. open_gripper → 2. move_arm (to object) → 3. close_gripper → 4. move_arm (to destination) → 5. open_gripper → 6. go_home
 - move_arm does NOT affect the gripper. Gripper state is preserved during arm movement.
-- Do NOT skip steps. Call each tool function in order."""
+- Do NOT skip steps. Call each tool function in order.
+
+## Gripper Orientation
+- For graspable objects, estimate `orientation` (0-90°): the angle of the nearest edge relative to horizontal.
+- Square/cube objects: use the nearest edge angle (4-fold symmetry, so 0-90° range).
+- Rectangular objects: use the short-axis angle for best grip (0-180° range, mod 90).
+- Round objects: omit orientation (not needed)."""
 
             response = self.client.models.generate_content(
                 model=self.model_name,
@@ -569,15 +572,23 @@ Analyze the image and create an execution plan using the available robot tools.
             gx = float(args.get("x", 500))
             gy = float(args.get("y", 500))
 
+            from lib.coordinate_transform import gemini_to_pixel
+            pixel = gemini_to_pixel(gx, gy, width, height)
             robot = gemini_to_robot(gx, gy, H, width, height)
             robot_x = round(robot["x"], 1)
             robot_y = round(robot["y"], 1)
+
+            # Debug: full pipeline trace
+            gemini_arm = args.get("arm", "not_set")
+            print(f"  [COORD] Gemini raw: gx={gx:.0f}, gy={gy:.0f}, arm_hint={gemini_arm}")
+            print(f"  [COORD] Pixel: px={pixel['x']:.1f}, py={pixel['y']:.1f} (of {width}x{height})")
+            print(f"  [COORD] Robot: rx={robot_x}, ry={robot_y}")
 
             # Auto arm selection based on converted robot x
             if args.get("arm") == "auto" or "arm" not in args:
                 args["arm"] = "left" if robot_x < 0 else "right"
 
-            print(f"  Coord convert: gemini({gx:.0f}, {gy:.0f}) -> robot({robot_x}, {robot_y}) arm={args['arm']}")
+            print(f"  [COORD] Arm decision: {args['arm']} (robot_x {'< 0' if robot_x < 0 else '>= 0'})")
 
             args["x"] = robot_x
             args["y"] = robot_y
@@ -586,6 +597,86 @@ Analyze the image and create an execution plan using the available robot tools.
             step["description"] = f"move_arm({', '.join(f'{k}={v}' for k, v in args.items())})"
 
         return steps
+
+    def verify_action(self, frame_bgr, step_type, context=""):
+        """
+        Verify robot action using arm camera frame.
+
+        Args:
+            frame_bgr: BGR frame from arm-mounted camera
+            step_type: "move_arm" (position check) or "gripper" (grasp check)
+            context: description of what should be verified
+
+        Returns:
+            dict with verified, description, offset (for position), correction_steps (for gripper)
+        """
+        if not self.client:
+            return {"verified": False, "error": "AI not initialized", "description": "No API key"}
+
+        try:
+            image_bytes = self._encode_frame(frame_bgr)
+            if image_bytes is None:
+                return {"verified": False, "description": "Failed to encode frame"}
+
+            if step_type == "move_arm":
+                prompt = f"""You are a robot verification assistant.
+This image is from a camera mounted on the robot gripper, looking downward.
+Task context: "{context}"
+
+Determine if the gripper is correctly positioned directly above the target object.
+If the object is NOT centered under the gripper, estimate the offset in millimeters.
+- dx: positive = move right, negative = move left
+- dy: positive = move forward/up, negative = move backward/down
+
+Respond in JSON:
+{{
+    "verified": true/false,
+    "description": "brief explanation",
+    "offset": {{"dx": 0, "dy": 0}}
+}}
+
+If the target object is centered or very close (within 2mm), set verified=true and offset to 0,0.
+"""
+            else:
+                prompt = f"""You are a robot verification assistant.
+This image is from a camera mounted on the robot gripper, looking downward.
+Task context: "{context}"
+
+Determine if the gripper has successfully grasped/released the object.
+If the action failed, suggest correction steps.
+
+Respond in JSON:
+{{
+    "verified": true/false,
+    "description": "brief explanation",
+    "correction_steps": []
+}}
+
+For correction_steps, use these tool formats:
+- {{"tool": "move_arm", "args": {{"x": 0, "y": 0, "z": 1}}}}
+- {{"tool": "open_gripper", "args": {{"arm": "right"}}}}
+- {{"tool": "close_gripper", "args": {{"arm": "right"}}}}
+Leave correction_steps empty if verified is true.
+"""
+
+            response = self.client.models.generate_content(
+                model=self.model_name,
+                contents=[
+                    prompt,
+                    types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg")
+                ],
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json"
+                )
+            )
+
+            result = json.loads(response.text)
+            print(f"[Verify] type={step_type} verified={result.get('verified')} desc={result.get('description', '')}")
+            return result
+
+        except Exception as e:
+            print(f"Verification Error: {e}")
+            return {"verified": False, "description": str(e)}
 
 if __name__ == "__main__":
     # Simple test
