@@ -538,8 +538,8 @@ def compute_geometry(config):
         
         # Try trilateration: find intersection of two circles
         # Circle 1: centered at Share Point, radius = share_to_vertex
-        # Circle 2: centered at Base, radius = reach_3d (Base→Vertex)
-        intersections = circle_intersection(share_point, share_to_v, base_pos, reach_3d)
+        # Circle 2: centered at Base, radius = reach_horiz (top-view horizontal projection)
+        intersections = circle_intersection(share_point, share_to_v, base_pos, reach_horiz)
         
         if intersections:
             # Use yaw to select correct intersection point
@@ -553,7 +553,7 @@ def compute_geometry(config):
             "x": round(vx, 1),
             "y": round(vy, 1),
             "owner": owner,
-            "reach": round(reach_3d, 1)  # 3D reach for display
+            "reach": round(reach_horiz, 1)  # Horizontal reach (top-view)
         }
 
 

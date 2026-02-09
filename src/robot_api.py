@@ -241,7 +241,11 @@ async def handle_move_to(request):
     min_reach = abs(a2 - a3)
     
     # Slot 5 (Wrist Roll): apply object orientation if provided
-    theta5 = float(orientation) if orientation is not None else 0.0
+    # Gripper world direction = θ1 + θ5, so θ5 = orientation - θ1
+    if orientation is not None:
+        theta5 = float(orientation) - theta1
+    else:
+        theta5 = 0.0
     theta6 = 0.0
     
     is_valid = True

@@ -13,7 +13,8 @@ import { WebRTCHelper } from './lib/webrtc-helper.mjs'
 // ─────────────────────────────────────────────────────────────────────────────
 
 const API_BASE = ''
-const SAFE_HEIGHT = 50  // mm above table for safe approach/ascend
+const SAFE_HEIGHT = 100  // mm above table for safe approach/ascend
+const MIN_Z = 5  // mm minimum Z height (never go below this)
 const MAX_VERIFY_RETRIES = 3  // max correction attempts per step
 const SVG_NS = 'http://www.w3.org/2000/svg'
 
@@ -560,6 +561,7 @@ async function abortPlan() {
 let lastMoveArgs = null
 
 async function _moveTo(x, y, z, arm, motionTime, orientation = null) {
+    z = Math.max(MIN_Z, z)  // Enforce minimum Z height
     const body = { x, y, z, arm, motion_time: motionTime }
     if (orientation != null) body.orientation = orientation
     const res = await fetch(`${API_BASE}/api/robot/move_to`, {
@@ -605,6 +607,9 @@ async function _verifyStep(step, result) {
             if (stepType == 'move_arm' && vResult.offset) {
                 const dx = vResult.offset.dx || 0
                 const dy = vResult.offset.dy || 0
+                // Camera image Y is inverted relative to robot Y
+                // (camera "up" = toward robot base = -Y in robot coords)
+                const camDy = -dy
                 // Tolerance: ignore offsets < 3mm
                 const offsetMag = Math.sqrt(dx * dx + dy * dy)
                 if (offsetMag < 3.0) {
@@ -614,8 +619,8 @@ async function _verifyStep(step, result) {
                 // Camera-to-robot 2D rotation by -yaw + damping
                 const DAMPING = 0.5
                 const yawRad = -(lastMoveArgs?.yaw || 0) * Math.PI / 180
-                const robotDx = (dx * Math.cos(yawRad) - dy * Math.sin(yawRad)) * DAMPING
-                const robotDy = (dx * Math.sin(yawRad) + dy * Math.cos(yawRad)) * DAMPING
+                const robotDx = (dx * Math.cos(yawRad) - camDy * Math.sin(yawRad)) * DAMPING
+                const robotDy = (dx * Math.sin(yawRad) + camDy * Math.cos(yawRad)) * DAMPING
                 const newX = (lastMoveArgs?.x || 0) + robotDx
                 const newY = (lastMoveArgs?.y || 0) + robotDy
                 showToast(`🔧 위치 보정: cam(${dx},${dy}) → robot(${robotDx.toFixed(1)},${robotDy.toFixed(1)})`)
@@ -666,9 +671,10 @@ async function _verifyStep(step, result) {
 
                 showToast(`🎯 재위치: (${coord.x}, ${coord.y}) arm=${coord.arm}`)
 
-                // 5. Re-position (approach + descend)
-                await _moveTo(coord.x, coord.y, SAFE_HEIGHT, coord.arm, 1.0)
-                const descRes = await _moveTo(coord.x, coord.y, args.z ?? 1, coord.arm, 1.5)
+                // 5. Re-position (approach + descend, with original orientation)
+                const retryOrientation = step.args?.orientation ?? null
+                await _moveTo(coord.x, coord.y, SAFE_HEIGHT, coord.arm, 1.0, retryOrientation)
+                const descRes = await _moveTo(coord.x, coord.y, args.z ?? 1, coord.arm, 1.5, retryOrientation)
                 lastMoveArgs = { x: coord.x, y: coord.y, arm: coord.arm, yaw: descRes.yaw_deg || 0 }
 
                 // 6. Close gripper again
@@ -705,8 +711,8 @@ async function executeStep(step) {
             if (ascendRes.success === false) return ascendRes
         }
 
-        // Phase 1: Approach — move to target XY at safe height
-        const approachRes = await _moveTo(targetX, targetY, SAFE_HEIGHT, arm, 1.0)
+        // Phase 1: Approach — move to target XY at safe height (with orientation for pre-alignment)
+        const approachRes = await _moveTo(targetX, targetY, SAFE_HEIGHT, arm, 1.0, orientation)
         if (approachRes.success === false) return approachRes
 
         // Phase 2: Descend — lower to target Z (with orientation for gripper alignment)
