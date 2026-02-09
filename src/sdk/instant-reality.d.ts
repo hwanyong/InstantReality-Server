@@ -35,6 +35,17 @@ export interface AutoExposureOptions {
     targetBrightness?: number
 }
 
+export interface CameraMetadata {
+    /** Camera resolution */
+    resolution: { width: number, height: number }
+    /** Millimeters per pixel (single value, preserves aspect ratio) */
+    mm_per_pixel: number
+    /** Calibration vertex positions in pixel coordinates */
+    vertices_px: Record<string, { x: number, y: number }>
+    /** Calibration vertex positions in real-world mm coordinates */
+    vertices_mm: Record<string, { x: number, y: number }>
+}
+
 /**
  * Main SDK Class
  */
@@ -49,6 +60,7 @@ export class InstantReality {
     maxCameras: number
     iceServers: RTCIceServer[]
     clientId: string | null
+    cameraMetadata: Record<string, CameraMetadata>
 
     // Event Listeners (Typed)
     on(event: 'track', callback: (track: MediaStreamTrack, role: string) => void): this
@@ -79,6 +91,13 @@ export class InstantReality {
      * @param role Role name (e.g. 'TopView')
      */
     getTrack(role: string): MediaStreamTrack | null
+
+    /**
+     * Get spatial metadata for a specific role.
+     * @param role Role name (e.g. 'TopView')
+     * @returns CameraMetadata or null if not calibrated
+     */
+    getMetadata(role: string): CameraMetadata | null
 
     /**
      * Connects to the server and negotiates WebRTC.

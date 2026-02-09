@@ -44,6 +44,7 @@ export class InstantReality {
         this.listeners = {}
         this.tracks = new Map()    // Map<role, {track, index}>
         this.clientId = null
+        this.cameraMetadata = {}   // Map<role, {resolution, mm_per_pixel, vertices_px, vertices_mm}>
         this._lastConnectOptions = {}
     }
 
@@ -111,6 +112,16 @@ export class InstantReality {
         return this.tracks.get(role)?.track || null
     }
 
+    /**
+     * Get spatial metadata for a specific role (resolution, mm_per_pixel, vertices).
+     * 
+     * @param {string} role - Role name (e.g. 'TopView')
+     * @returns {Object|null} Metadata object or null if not available
+     */
+    getMetadata(role) {
+        return this.cameraMetadata[role] || null
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // WebRTC Core Methods
     // ─────────────────────────────────────────────────────────────────────────
@@ -169,6 +180,9 @@ export class InstantReality {
 
         // Store mapped roles from server
         this.mappedRoles = answer.mapped_roles || options.roles || []
+
+        // Store camera metadata (mm_per_pixel, resolution, vertices)
+        this.cameraMetadata = answer.camera_metadata || {}
 
         // Define ontrack handler AFTER we have mappedRoles
         pc.ontrack = (evt) => {

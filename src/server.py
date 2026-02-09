@@ -29,7 +29,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.camera_manager import get_camera, get_active_cameras, init_cameras, set_camera_focus, set_camera_exposure, set_camera_auto_exposure, on_camera_refresh
 from src.camera_mapping import get_index_by_role, get_available_devices, match_roles, assign_role, VALID_ROLES, save_camera_settings, get_all_settings, get_roi_config, save_roi_config, invalidate_role_cache
-from src.calibration_manager import get_calibration_for_role, save_calibration_for_role
+from src.calibration_manager import get_calibration_for_role, save_calibration_for_role, build_camera_metadata
 from src.ai_engine import GeminiBrain
 import robot_api
 from lib.connection_logger import log_webrtc_connect, log_webrtc_disconnect, log_ws_connect, log_ws_disconnect, log_stream_start, log_stream_end
@@ -990,11 +990,19 @@ async def handle_offer(request):
     answer = await pc.createAnswer()
     await pc.setLocalDescription(answer)
     
+    # Build camera metadata for mapped roles
+    camera_metadata = {}
+    for role in mapped_roles:
+        meta = build_camera_metadata(role)
+        if meta:
+            camera_metadata[role] = meta
+
     return web.json_response({
         "sdp": pc.localDescription.sdp,
         "type": pc.localDescription.type,
         "client_id": pc_id,
-        "mapped_roles": mapped_roles  # Return actual role mapping
+        "mapped_roles": mapped_roles,
+        "camera_metadata": camera_metadata if camera_metadata else None
     })
 
 
