@@ -5,7 +5,7 @@
 
 import { showToast, showSuccess, showError } from './lib/toast.mjs'
 import { computeHomography, applyHomography, isValidHomography, computeReprojectionError, pixelToRobot } from './transform.mjs'
-import { robotConnect, robotDisconnect, robotHome, robotZero, robotMoveTo, robotStatus, calculateIK, getServoConfig, getCalibrationGeometry } from './lib/robot-api.mjs'
+import { robotConnect, robotDisconnect, robotHome, robotZero, robotMoveTo, robotStatus, calculateIK, getServoConfig, getCalibrationGeometry, robotGripperOpen, robotGripperClose } from './lib/robot-api.mjs'
 import { WebRTCHelper } from './lib/webrtc-helper.mjs'
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -366,6 +366,7 @@ function renderOverlay() {
 
         // Vertex click handler
         circle.addEventListener('mousedown', (e) => {
+            if (overlayState.testModeActive) return
             e.stopPropagation()
             const coords = getSVGCoordinates(e)
             if (!coords) return
@@ -409,9 +410,12 @@ function renderOverlay() {
 
 // Handle SVG background click (add vertex only - base/share are auto-calculated)
 function handleSVGClick(e) {
-    // Ignore if clicking on existing element (including test markers)
-    if (e.target.closest('.vertex') || e.target.closest('.marker') || e.target.closest('.delete-btn') || e.target.closest('.test-marker')) {
-        return
+    // In test mode, allow clicks on vertices to pass through for test marker placement
+    if (!overlayState.testModeActive) {
+        // Ignore if clicking on existing element (including test markers)
+        if (e.target.closest('.vertex') || e.target.closest('.marker') || e.target.closest('.delete-btn') || e.target.closest('.test-marker')) {
+            return
+        }
     }
 
     const coords = getSVGCoordinates(e)
@@ -437,6 +441,7 @@ function handleSVGClick(e) {
 
 // Handle mouse move for dragging
 function handleSVGMouseMove(e) {
+    if (overlayState.testModeActive) return
     if (!overlayState.isDragging || overlayState.selectedVertex == null) return
 
     const coords = getSVGCoordinates(e)
@@ -740,6 +745,9 @@ function toggleTestMode() {
 
     const btn = document.getElementById('test-mode-btn')
     const vertexBtn = document.getElementById('tool-vertex')
+    const clearBtn = document.getElementById('tool-clear')
+    const vertexGroup = document.getElementById('vertex-group')
+    const polygon = document.getElementById('workspace-polygon')
 
     if (btn) {
         btn.classList.toggle('active', overlayState.testModeActive)
@@ -747,10 +755,29 @@ function toggleTestMode() {
         btn.style.color = overlayState.testModeActive ? '#000' : ''
     }
 
-    // Disable vertex tool when test mode is active
+    // Disable all vertex interactions when test mode is active
+    const disabled = overlayState.testModeActive
     if (vertexBtn) {
-        vertexBtn.disabled = overlayState.testModeActive
-        vertexBtn.style.opacity = overlayState.testModeActive ? '0.5' : ''
+        vertexBtn.disabled = disabled
+        vertexBtn.style.opacity = disabled ? '0.5' : ''
+    }
+    if (clearBtn) {
+        clearBtn.disabled = disabled
+        clearBtn.style.opacity = disabled ? '0.5' : ''
+    }
+    if (vertexGroup) {
+        vertexGroup.style.pointerEvents = disabled ? 'none' : ''
+        vertexGroup.style.opacity = disabled ? '0.5' : ''
+    }
+    if (polygon) {
+        polygon.style.pointerEvents = disabled ? 'none' : ''
+        polygon.style.opacity = disabled ? '0.5' : ''
+    }
+
+    // Deselect vertex when entering test mode
+    if (disabled) {
+        overlayState.selectedVertex = null
+        renderOverlay()
     }
 
     if (overlayState.testModeActive) {
@@ -825,7 +852,9 @@ async function addTestMarker(pixelCoords, robotCoords) {
 
     // Call move_to API to actually move the robot
     try {
-        const moveData = await robotMoveTo(robotCoords.x, robotCoords.y, 5, robotCoords.arm, motionTime)
+        const zInput = document.getElementById('test-z-value')
+        const z = parseFloat(zInput?.value || 5)
+        const moveData = await robotMoveTo(robotCoords.x, robotCoords.y, z, robotCoords.arm, motionTime)
 
         if (moveData.success) {
             showToast(`🤖 이동 중... (${motionTime}s)`)
@@ -1252,6 +1281,7 @@ function initRobotControl() {
                 statusSpan.className = 'robot-status-inline connected'
                 disconnectBtn.disabled = false
                 homeBtn.disabled = false
+                document.querySelectorAll('#gripper-open-left, #gripper-close-left, #gripper-open-right, #gripper-close-right').forEach(b => b.disabled = false)
                 zeroBtn.disabled = false
                 connectBtn.disabled = true
             } else {
@@ -1273,6 +1303,7 @@ function initRobotControl() {
             statusSpan.className = 'robot-status-inline'
             disconnectBtn.disabled = true
             homeBtn.disabled = true
+            document.querySelectorAll('#gripper-open-left, #gripper-close-left, #gripper-open-right, #gripper-close-right').forEach(b => b.disabled = true)
             zeroBtn.disabled = true
             connectBtn.disabled = false
         } catch (e) {
@@ -1324,6 +1355,46 @@ function initRobotControl() {
         }
     })
 
+    // Z height range ↔ number input sync
+    const zRange = document.getElementById('test-z-range')
+    const zValue = document.getElementById('test-z-value')
+    if (zRange && zValue) {
+        zRange.addEventListener('input', () => { zValue.value = zRange.value })
+        zValue.addEventListener('input', () => {
+            const v = Math.max(-10, Math.min(100, parseInt(zValue.value) || 0))
+            zRange.value = v
+        })
+    }
+
+    // Gripper buttons
+    const gripperBtns = [
+        { id: 'gripper-open-left', fn: () => robotGripperOpen('left'), label: '🤚 L Open' },
+        { id: 'gripper-close-left', fn: () => robotGripperClose('left'), label: '✊ L Close' },
+        { id: 'gripper-open-right', fn: () => robotGripperOpen('right'), label: '🤚 R Open' },
+        { id: 'gripper-close-right', fn: () => robotGripperClose('right'), label: '✊ R Close' },
+    ]
+    gripperBtns.forEach(({ id, fn, label }) => {
+        const btn = document.getElementById(id)
+        if (!btn) return
+        btn.addEventListener('click', async () => {
+            btn.disabled = true
+            btn.textContent = '⏳'
+            try {
+                const res = await fn()
+                if (res.success) {
+                    showToast(res.message || `${label} 완료`)
+                } else {
+                    showError(res.error || `${label} 실패`)
+                }
+            } catch (e) {
+                showError(`Gripper 오류: ${e.message}`)
+            } finally {
+                btn.disabled = false
+                btn.textContent = label
+            }
+        })
+    })
+
     // Check initial status
     fetchRobotStatus()
 }
@@ -1347,6 +1418,7 @@ async function fetchRobotStatus() {
                 disconnectBtn.disabled = false
                 homeBtn.disabled = false
                 zeroBtn.disabled = false
+                document.querySelectorAll('#gripper-open-left, #gripper-close-left, #gripper-open-right, #gripper-close-right').forEach(b => b.disabled = false)
             } else {
                 statusSpan.textContent = 'Disconnected'
                 statusSpan.className = 'robot-status-inline'

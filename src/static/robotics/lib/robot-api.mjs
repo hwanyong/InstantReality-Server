@@ -93,3 +93,15 @@ export async function getServoConfig() {
 export async function getCalibrationGeometry() {
     return await getJSON('/api/calibration/geometry')
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Gripper Control
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function robotGripperOpen(arm = 'right') {
+    return await postJSON('/api/robot/gripper/open', { arm })
+}
+
+export async function robotGripperClose(arm = 'right') {
+    return await postJSON('/api/robot/gripper/close', { arm })
+}

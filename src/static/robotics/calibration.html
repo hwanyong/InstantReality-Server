@@ -341,6 +341,7 @@
         /* Robot Control Tab */
         .robot-control-compact {
             display: flex;
+            flex-wrap: wrap;
             gap: 12px;
             align-items: flex-start;
         }
@@ -511,6 +512,31 @@
                                         <label style="font-size: 0.7rem; color: var(--text-secondary);">Speed:</label>
                                         <input type="range" id="motion-speed" min="0.5" max="5" step="0.5" value="3">
                                         <span id="speed-value">3s</span>
+                                    </div>
+                                </div>
+                                <div class="control-group">
+                                    <div class="z-control" style="display: flex; align-items: center; gap: 6px;">
+                                        <label
+                                            style="font-size: 0.7rem; color: var(--text-secondary); min-width: 16px;">Z:</label>
+                                        <input type="range" id="test-z-range" min="-10" max="100" step="1" value="5"
+                                            style="width: 80px; accent-color: var(--accent);">
+                                        <input type="number" id="test-z-value" min="-10" max="100" step="1" value="5"
+                                            style="width: 54px; padding: 2px 4px; font-size: 0.75rem; background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 4px; text-align: right;">
+                                        <span style="font-size: 0.7rem; color: var(--text-secondary);">mm</span>
+                                    </div>
+                                    <div class="btn-row">
+                                        <button id="gripper-open-left" class="btn" disabled
+                                            style="font-size: 0.7rem; padding: 4px 8px; border-color: #ff6b6b;">🤚 L
+                                            Open</button>
+                                        <button id="gripper-close-left" class="btn" disabled
+                                            style="font-size: 0.7rem; padding: 4px 8px; border-color: #ff6b6b;">✊ L
+                                            Close</button>
+                                        <button id="gripper-open-right" class="btn" disabled
+                                            style="font-size: 0.7rem; padding: 4px 8px; border-color: #4dabf7;">🤚 R
+                                            Open</button>
+                                        <button id="gripper-close-right" class="btn" disabled
+                                            style="font-size: 0.7rem; padding: 4px 8px; border-color: #4dabf7;">✊ R
+                                            Close</button>
                                     </div>
                                 </div>
                             </div>
