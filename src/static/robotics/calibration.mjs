@@ -1187,6 +1187,32 @@ function initEventListeners() {
             showSuccess('설정 로드 완료')
         })
     }
+
+    // Capture All button - download all camera FHD frames as ZIP
+    const captureAllBtn = document.getElementById('capture-all-btn')
+    if (captureAllBtn) {
+        captureAllBtn.addEventListener('click', async () => {
+            captureAllBtn.disabled = true
+            captureAllBtn.textContent = '⏳ Capturing...'
+            try {
+                const res = await fetch('/api/capture_all')
+                if (!res.ok) throw new Error(`HTTP ${res.status}`)
+                const blob = await res.blob()
+                const url = URL.createObjectURL(blob)
+                const a = document.createElement('a')
+                a.href = url
+                a.download = res.headers.get('Content-Disposition')?.match(/filename="(.+)"/)?.[1] || 'capture.zip'
+                a.click()
+                URL.revokeObjectURL(url)
+                showSuccess('캡쳐 다운로드 완료')
+            } catch (e) {
+                showError(`캡쳐 실패: ${e.message}`)
+            } finally {
+                captureAllBtn.disabled = false
+                captureAllBtn.textContent = '📸 Capture'
+            }
+        })
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
