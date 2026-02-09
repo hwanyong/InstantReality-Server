@@ -2,6 +2,7 @@ opencv-python
 pyserial
 numpy
 trimesh
+scipy
 aiortc
 google-genai
 aiohttp
