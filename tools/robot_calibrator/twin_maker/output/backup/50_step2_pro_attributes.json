@@ -1,0 +1,12 @@
+[
+    {
+        "label": "Red_Dice",
+        "z_mm": 0,
+        "rotation": 0
+    },
+    {
+        "label": "White_Dice",
+        "z_mm": 0,
+        "rotation": 45
+    }
+]

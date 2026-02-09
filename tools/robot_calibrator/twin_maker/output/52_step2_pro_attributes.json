@@ -1,0 +1,37 @@
+[
+    {
+        "label": "White_Dice",
+        "z_mm": 0,
+        "rotation": 45
+    },
+    {
+        "label": "Orange_Dice",
+        "z_mm": 0,
+        "rotation": 0
+    },
+    {
+        "label": "Yellow_Dice",
+        "z_mm": 0,
+        "rotation": 30
+    },
+    {
+        "label": "Blue_Dice",
+        "z_mm": 0,
+        "rotation": 10
+    },
+    {
+        "label": "Green_Dice",
+        "z_mm": 0,
+        "rotation": 0
+    },
+    {
+        "label": "Pink_Dice",
+        "z_mm": 0,
+        "rotation": 45
+    },
+    {
+        "label": "Red_Dice",
+        "z_mm": 0,
+        "rotation": 0
+    }
+]

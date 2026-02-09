@@ -1,0 +1,44 @@
+[
+    {
+        "point": [
+            303,
+            390
+        ],
+        "label": "Red_Dice"
+    },
+    {
+        "point": [
+            297,
+            503
+        ],
+        "label": "Pink_Dice"
+    },
+    {
+        "point": [
+            431,
+            606
+        ],
+        "label": "Green_Dice"
+    },
+    {
+        "point": [
+            484,
+            447
+        ],
+        "label": "Blue_Dice"
+    },
+    {
+        "point": [
+            603,
+            565
+        ],
+        "label": "Orange_Dice"
+    },
+    {
+        "point": [
+            693,
+            463
+        ],
+        "label": "Yellow_Dice"
+    }
+]

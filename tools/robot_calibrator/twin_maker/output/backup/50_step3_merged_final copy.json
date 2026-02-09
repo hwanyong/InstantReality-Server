@@ -1,0 +1,22 @@
+[
+    {
+        "label": "Red_Dice",
+        "z_mm": 0,
+        "rotation": 0,
+        "unique_id": "Red_Dice_0",
+        "point": [
+            471,
+            558
+        ]
+    },
+    {
+        "label": "White_Dice",
+        "z_mm": 0,
+        "rotation": 45,
+        "unique_id": "White_Dice_0",
+        "point": [
+            529,
+            520
+        ]
+    }
+]
