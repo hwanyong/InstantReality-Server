@@ -44,6 +44,7 @@ logger = logging.getLogger(__name__)
 # Global instances
 brain: GeminiBrain = None
 SCENE_INVENTORY = []
+TWIN_CACHE = {'json': None, 'glb': None}  # Cached twin data
 
 # WebRTC state
 pcs = set()  # Active PeerConnections
@@ -240,6 +241,119 @@ async def handle_scene_init(request):
 async def handle_scene_get(request):
     """GET /api/scene - Get current scene inventory"""
     return web.json_response({"objects": SCENE_INVENTORY})
+
+
+# =============================================================================
+# Digital Twin API
+# =============================================================================
+
+async def handle_twin_generate(request):
+    """POST /api/twin/generate - Full pipeline: capture → scan → GLB generation.
+
+    Captures TopView camera, runs Gemini scene analysis,
+    converts to VR coordinates via Homography, generates GLB.
+    """
+    global TWIN_CACHE
+
+    if not brain:
+        return web.json_response({"error": "AI not initialized"}, status=503)
+
+    # 1. Capture TopView frame
+    topview_idx = get_index_by_role("TopView")
+    if topview_idx is None:
+        return web.json_response({"error": "TopView camera not configured"}, status=400)
+
+    topview_cam = get_camera(topview_idx)
+    topview_frame, _ = topview_cam.get_frames()
+    if topview_frame is None:
+        return web.json_response({"error": "Failed to capture TopView frame"}, status=500)
+
+    # Optional QuarterView
+    quarterview_frame = None
+    quarterview_idx = get_index_by_role("QuarterView")
+    if quarterview_idx is not None:
+        quarterview_cam = get_camera(quarterview_idx)
+        quarterview_frame, _ = quarterview_cam.get_frames()
+
+    # 2. Run Gemini scene scan
+    roi_config = get_roi_config()
+    scan_result = brain.scan_scene_with_roi(
+        topview_frame, quarterview_frame,
+        roi_config=roi_config, precision=False
+    )
+
+    if "error" in scan_result and not scan_result.get("objects"):
+        return web.json_response({"error": scan_result["error"]}, status=500)
+
+    # 3. Get calibration for Homography transform
+    from calibration_manager import get_calibration_for_role
+    cal = get_calibration_for_role("TopView")
+    if not cal:
+        cal = {}  # Will use fallback coordinates
+        logger.warning("No TopView calibration — using fallback coordinate mapping")
+
+    # 4. Build VR JSON + GLB
+    from twin_generator import build_twin_json, build_twin_glb
+
+    twin_json = build_twin_json(scan_result, cal)
+    glb_bytes = build_twin_glb(twin_json)
+
+    # 5. Cache results
+    TWIN_CACHE['json'] = twin_json
+    TWIN_CACHE['glb'] = glb_bytes
+
+    # Also save to disk for static serving fallback
+    cache_dir = Path(__file__).parent / 'static' / 'twin'
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    (cache_dir / 'scene.json').write_text(json.dumps(twin_json, indent=2))
+    (cache_dir / 'scene.glb').write_bytes(glb_bytes)
+
+    logger.info(f"Twin generated: {len(twin_json.get('objects', []))} objects, GLB {len(glb_bytes)} bytes")
+
+    return web.json_response({
+        "status": "ok",
+        "objects_count": len(twin_json.get('objects', [])),
+        "glb_size_bytes": len(glb_bytes),
+        "glb_url": "/api/twin/scene.glb",
+    })
+
+
+async def handle_twin_json(request):
+    """GET /api/twin/scene.json - Return cached VR JSON."""
+    if TWIN_CACHE['json']:
+        return web.json_response(TWIN_CACHE['json'])
+
+    # Try disk fallback
+    cache_file = Path(__file__).parent / 'static' / 'twin' / 'scene.json'
+    if cache_file.exists():
+        data = json.loads(cache_file.read_text())
+        TWIN_CACHE['json'] = data
+        return web.json_response(data)
+
+    return web.json_response({"error": "No twin data. Call POST /api/twin/generate first."}, status=404)
+
+
+async def handle_twin_glb(request):
+    """GET /api/twin/scene.glb - Return cached GLB binary."""
+    if TWIN_CACHE['glb']:
+        return web.Response(
+            body=TWIN_CACHE['glb'],
+            content_type='model/gltf-binary',
+            headers={'Content-Disposition': 'inline; filename="scene.glb"'}
+        )
+
+    # Try disk fallback
+    cache_file = Path(__file__).parent / 'static' / 'twin' / 'scene.glb'
+    if cache_file.exists():
+        glb_bytes = cache_file.read_bytes()
+        TWIN_CACHE['glb'] = glb_bytes
+        return web.Response(
+            body=glb_bytes,
+            content_type='model/gltf-binary',
+            headers={'Content-Disposition': 'inline; filename="scene.glb"'}
+        )
+
+    return web.json_response({"error": "No twin data. Call POST /api/twin/generate first."}, status=404)
 
 
 async def handle_gemini_analyze(request):
@@ -1244,6 +1358,10 @@ def create_app():
         web.post('/api/gemini/execute', handle_gemini_execute),
         web.post('/api/robot/verify', handle_verify),
         web.post('/api/coord/convert', handle_coord_convert),
+        # Twin API
+        web.post('/api/twin/generate', handle_twin_generate),
+        web.get('/api/twin/scene.json', handle_twin_json),
+        web.get('/api/twin/scene.glb', handle_twin_glb),
         # Camera Management API
         web.post('/api/cameras/scan', handle_cameras_scan),
         web.post('/api/cameras/assign', handle_cameras_assign),

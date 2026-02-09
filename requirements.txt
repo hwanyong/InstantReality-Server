@@ -1,6 +1,7 @@
 opencv-python
 pyserial
 numpy
+trimesh
 aiortc
 google-genai
 aiohttp
