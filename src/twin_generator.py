@@ -145,16 +145,20 @@ def build_twin_json(scan_result, calibration_data, dice_size_mm=20.0):
 # GLB Builder
 # =============================================================================
 
-def build_twin_glb(twin_json, default_size=20.0):
+def build_twin_glb(twin_json, default_size_mm=20.0):
     """Convert VR JSON into GLB binary using trimesh.
+
+    GLB is exported in **meter** units (glTF standard).
+    - Cube size: default_size_mm * 0.001 (e.g. 20mm → 0.02m)
+    - Coordinates: mm values from JSON are converted via * 0.001
+    - Floor correction: cubes are shifted up by half-height so bottom sits on Y=0
 
     Args:
         twin_json: dict from build_twin_json() with 'objects' list
-        default_size: Default cube size in mm (for objects without explicit scale)
+        default_size_mm: Cube size in mm (default 20mm)
 
     Returns:
         bytes: GLB binary data
-        None if trimesh is not available
 
     Raises:
         ImportError: if trimesh is not installed
@@ -164,16 +168,20 @@ def build_twin_glb(twin_json, default_size=20.0):
 
     import numpy as np
 
+    MM_TO_M = 0.001
     scene = trimesh.Scene()
-    size = twin_json.get('dice_size_mm', default_size)
+    box_size = twin_json.get('dice_size_mm', default_size_mm) * MM_TO_M  # e.g. 20mm → 0.02m
 
     for obj in twin_json.get('objects', []):
         obj_id = obj.get('id', 'unknown')
         props = obj.get('properties', {})
         trans = obj.get('transform', {})
 
-        # Create box mesh
-        mesh = trimesh.creation.box(extents=[size, size, size])
+        # Create box mesh (meter units)
+        mesh = trimesh.creation.box(extents=[box_size, box_size, box_size])
+
+        # Floor correction: shift cube up so bottom face sits at Y=0
+        mesh.apply_translation([0, box_size / 2, 0])
 
         # Apply color
         color_name = props.get('color', 'gray')
@@ -197,10 +205,12 @@ def build_twin_glb(twin_json, default_size=20.0):
         matrix_scale[1, 1] = scl['y']
         matrix_scale[2, 2] = scl['z']
 
-        # Translation matrix
-        matrix_trans = trimesh.transformations.translation_matrix(
-            [pos['x'], pos['y'], pos['z']]
-        )
+        # Translation matrix (mm → m conversion)
+        matrix_trans = trimesh.transformations.translation_matrix([
+            pos['x'] * MM_TO_M,
+            pos['y'] * MM_TO_M,
+            pos['z'] * MM_TO_M,
+        ])
 
         # Combine: T @ R @ S
         final_transform = trimesh.transformations.concatenate_matrices(
