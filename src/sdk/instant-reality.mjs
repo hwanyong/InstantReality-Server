@@ -42,7 +42,7 @@ export class InstantReality {
         this.ws = null
         this.trackCounter = 0
         this.listeners = {}
-        this.tracks = new Map()
+        this.tracks = new Map()    // Map<role, {track, index}>
         this.clientId = null
         this._lastConnectOptions = {}
     }
@@ -93,16 +93,22 @@ export class InstantReality {
     }
 
     /**
-     * Get roles that are currently connected (have cameras assigned).
-     * Requires getRoles() to be called first.
+     * Get roles that are currently connected (have active tracks).
      * 
      * @returns {string[]} Array of connected role names
      */
     getConnectedRoles() {
-        if (!this.roleMap) return []
-        return Object.entries(this.roleMap)
-            .filter(([_, info]) => info.connected)
-            .map(([role, _]) => role)
+        return [...this.tracks.keys()]
+    }
+
+    /**
+     * Get the MediaStreamTrack for a specific role.
+     * 
+     * @param {string} role - Role name (e.g. 'TopView')
+     * @returns {MediaStreamTrack|null}
+     */
+    getTrack(role) {
+        return this.tracks.get(role)?.track || null
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -121,7 +127,7 @@ export class InstantReality {
         this.trackCounter = 0
         this.tracks.clear()
 
-        const enabledCameras = options.cameras
+        const enabledCameras = options.cameras    // Role names to enable initially
 
         pc.onconnectionstatechange = () => {
             if (pc.connectionState == 'connected') {
@@ -168,17 +174,15 @@ export class InstantReality {
         pc.ontrack = (evt) => {
             if (evt.track.kind != 'video') return
             const cameraIndex = this.trackCounter++
-            this.tracks.set(cameraIndex, evt.track)
+            const role = this.mappedRoles[cameraIndex] || `camera_${cameraIndex}`
+            this.tracks.set(role, { track: evt.track, index: cameraIndex })
 
             // Set initial enabled state
             if (enabledCameras != null) {
-                evt.track.enabled = enabledCameras.includes(cameraIndex)
+                evt.track.enabled = enabledCameras.includes(role)
             }
 
-            // Get role name for this track if available
-            const roleName = this.mappedRoles[cameraIndex]
-
-            this.emit('track', evt.track, cameraIndex, roleName)
+            this.emit('track', evt.track, role)
         }
 
         await pc.setRemoteDescription(answer)
@@ -253,41 +257,43 @@ export class InstantReality {
     // Track On/Off Methods
     // ─────────────────────────────────────────────────────────────────────────
 
-    async setTrackEnabled(cameraIndex, enabled) {
-        const track = this.tracks.get(cameraIndex)
-        if (!track) return false
-        track.enabled = enabled
+    async setTrackEnabled(role, enabled) {
+        const entry = this.tracks.get(role)
+        if (!entry) return false
+        entry.track.enabled = enabled
 
         // Call server to pause/resume (saves bandwidth)
         await fetch(`${this.serverUrl}/pause_camera`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                camera_index: cameraIndex,
+                camera_index: entry.index,
                 paused: !enabled,
                 client_id: this.clientId
             })
         })
 
-        this.emit(enabled ? 'trackEnabled' : 'trackDisabled', cameraIndex)
+        this.emit(enabled ? 'trackEnabled' : 'trackDisabled', role)
         return true
     }
 
-    isTrackEnabled(cameraIndex) {
-        const track = this.tracks.get(cameraIndex)
-        return track ? track.enabled : false
+    isTrackEnabled(role) {
+        const entry = this.tracks.get(role)
+        return entry ? entry.track.enabled : false
     }
 
     // ─────────────────────────────────────────────────────────────────────────
     // Camera Control Methods
     // ─────────────────────────────────────────────────────────────────────────
 
-    async setFocus(cameraIndex, options = {}) {
+    async setFocus(role, options = {}) {
+        const entry = this.tracks.get(role)
+        if (!entry) throw new Error(`Unknown role: ${role}`)
         const response = await fetch(`${this.serverUrl}/set_focus`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                camera_index: cameraIndex,
+                camera_index: entry.index,
                 auto: options.auto ?? true,
                 value: options.value ?? 0
             })
@@ -298,12 +304,14 @@ export class InstantReality {
         return response.json()
     }
 
-    async setExposure(cameraIndex, value) {
+    async setExposure(role, value) {
+        const entry = this.tracks.get(role)
+        if (!entry) throw new Error(`Unknown role: ${role}`)
         const response = await fetch(`${this.serverUrl}/set_exposure`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                camera_index: cameraIndex,
+                camera_index: entry.index,
                 value: value
             })
         })
@@ -313,12 +321,14 @@ export class InstantReality {
         return response.json()
     }
 
-    async setAutoExposure(cameraIndex, options = {}) {
+    async setAutoExposure(role, options = {}) {
+        const entry = this.tracks.get(role)
+        if (!entry) throw new Error(`Unknown role: ${role}`)
         const response = await fetch(`${this.serverUrl}/set_auto_exposure`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                camera_index: cameraIndex,
+                camera_index: entry.index,
                 enabled: options.enabled ?? false,
                 target_brightness: options.targetBrightness ?? 128
             })
@@ -329,8 +339,10 @@ export class InstantReality {
         return response.json()
     }
 
-    async capture(cameraIndex) {
-        const response = await fetch(`${this.serverUrl}/capture?camera_index=${cameraIndex}`)
+    async capture(role) {
+        const entry = this.tracks.get(role)
+        if (!entry) throw new Error(`Unknown role: ${role}`)
+        const response = await fetch(`${this.serverUrl}/capture?camera_index=${entry.index}`)
         if (!response.ok) {
             throw new Error('Capture failed')
         }
