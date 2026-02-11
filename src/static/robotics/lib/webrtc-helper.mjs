@@ -42,8 +42,8 @@ export class WebRTCHelper {
         }
 
         // 2. Wire up SDK events
-        this.ir.on('track', (track, index, roleName) => {
-            const role = roleName || this.roles[index]
+        this.ir.on('track', (track, role) => {
+            const index = this.roles.indexOf(role)
             console.log(`WebRTCHelper: Received track ${index}, role: ${role}`)
             this._emit('track', track, index, role)
         })
