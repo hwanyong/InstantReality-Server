@@ -1,8 +1,17 @@
 """
-Robotics Module - Placeholder
+Robotics Module
 
-This module has been reset for reimplementation.
-Add your robotics components here as you build them.
+Business logic for robot kinematics and motion planning.
+API handlers (server.py, robot_api.py) delegate to this module.
 """
 
-__all__ = []
+from .ik_service import solve_ik, compute_pulses, compute_ik_detail, compute_ik_for_motion
+from .config_cache import get_config
+
+__all__ = [
+    "solve_ik",
+    "compute_pulses",
+    "compute_ik_detail",
+    "compute_ik_for_motion",
+    "get_config",
+]

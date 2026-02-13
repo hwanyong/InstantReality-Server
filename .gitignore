@@ -183,3 +183,4 @@ cython_debug/
 captures/
 logs/
 .DS_Store
+_legacy/
