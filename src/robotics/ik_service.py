@@ -46,7 +46,7 @@ def solve_ik(world_x, world_y, z, base_x, base_y, link_lengths):
         world_x, world_y: Share Point origin coordinates (mm)
         z: Z height (mm) — z_offset already applied by caller
         base_x, base_y: Arm base coordinates (mm)
-        link_lengths: dict with keys d1, a2, a3, a4, a6
+        link_lengths: dict with keys d1, a2, a3, a4, a5, a6
 
     Returns:
         IKResult dataclass
@@ -55,6 +55,7 @@ def solve_ik(world_x, world_y, z, base_x, base_y, link_lengths):
     a2 = link_lengths["a2"]
     a3 = link_lengths["a3"]
     a4 = link_lengths["a4"]
+    a5 = link_lengths["a5"]
     a6 = link_lengths["a6"]
 
     # Local coordinates
@@ -70,7 +71,7 @@ def solve_ik(world_x, world_y, z, base_x, base_y, link_lengths):
     reach = math.sqrt(local_x**2 + local_y**2)
 
     # 5-Link IK: Gripper tip at -90° (pointing down)
-    wrist_z = z + a4 + a6
+    wrist_z = z + a4 + a5 + a6
     s = wrist_z - d1
     dist_sq = reach**2 + s**2
     dist = math.sqrt(dist_sq)
@@ -193,7 +194,8 @@ def _load_arm_data(arm):
         "a2": slots[2].get("length", 105.0),
         "a3": slots[3].get("length", 150.0),
         "a4": slots[4].get("length", 65.0),
-        "a6": slots[6].get("length", 70.0),
+        "a5": slots[5].get("length", 0.0),
+        "a6": slots[6].get("length", 115.0),
     }
 
     return arm_config, slots, base, link_lengths

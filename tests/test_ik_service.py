@@ -7,7 +7,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 from robotics.ik_service import solve_ik, compute_ik_detail, compute_ik_for_motion
 
 
-LINKS = {"d1": 107, "a2": 105, "a3": 150, "a4": 65, "a6": 70}
+LINKS = {"d1": 107, "a2": 105, "a3": 150, "a4": 65, "a5": 0, "a6": 70}
 
 
 # ── Layer 1: solve_ik ──
@@ -78,5 +78,5 @@ def test_compute_ik_for_motion_orientation():
 
 def test_compute_ik_for_motion_left_arm():
     """left_arm도 정상 동작"""
-    result = compute_ik_for_motion(-100, 200, 3, "left_arm")
+    result = compute_ik_for_motion(-100, 100, 3, "left_arm")
     assert result["valid"] == True
