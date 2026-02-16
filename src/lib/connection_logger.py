@@ -1,5 +1,6 @@
-# Connection Logger
+# Connection & File Logger
 # Logs client connection events to logs/connection.log
+# Also exports create_file_logger() for other log files (access.log, server.log)
 # Rotation: 5MB max, backups named {name}-{yyyyMMddHHmmss}.log
 
 import os
@@ -17,11 +18,14 @@ MAX_BYTES = 5 * 1024 * 1024  # 5MB
 BACKUP_COUNT = 10
 
 
-def _timestamped_namer(default_name):
-    """Rename rotated log: connection.log.1 → connection-20260201210352.log"""
-    base_dir = os.path.dirname(default_name)
-    stamp = datetime.now().strftime("%Y%m%d%H%M%S")
-    return os.path.join(base_dir, f"connection-{stamp}.log")
+def _make_timestamped_namer(base_name):
+    """Create a namer function for rotated logs: base.log.1 → base-20260201210352.log"""
+    stem = base_name.rsplit(".", 1)[0] if "." in base_name else base_name
+    def namer(default_name):
+        base_dir = os.path.dirname(default_name)
+        stamp = datetime.now().strftime("%Y%m%d%H%M%S")
+        return os.path.join(base_dir, f"{stem}-{stamp}.log")
+    return namer
 
 
 def _noop_rotator(source, dest):
@@ -30,23 +34,28 @@ def _noop_rotator(source, dest):
         os.rename(source, dest)
 
 
-def _create_logger():
+def create_file_logger(name, filename, max_bytes=MAX_BYTES, backup_count=BACKUP_COUNT):
+    """Create a named logger that writes to logs/{filename} with rotation.
+
+    Reusable factory for any log file with the same rotation pattern.
+    Returns the configured logger. Idempotent — safe to call multiple times.
+    """
     os.makedirs(LOG_DIR, exist_ok=True)
 
-    logger = logging.getLogger("connection")
-    if logger.handlers:
-        return logger
+    file_logger = logging.getLogger(name)
+    if file_logger.handlers:
+        return file_logger
 
-    logger.setLevel(logging.INFO)
-    logger.propagate = False
+    file_logger.setLevel(logging.INFO)
+    file_logger.propagate = False
 
     handler = RotatingFileHandler(
-        str(LOG_FILE),
-        maxBytes=MAX_BYTES,
-        backupCount=BACKUP_COUNT,
+        str(LOG_DIR / filename),
+        maxBytes=max_bytes,
+        backupCount=backup_count,
         encoding="utf-8",
     )
-    handler.namer = _timestamped_namer
+    handler.namer = _make_timestamped_namer(filename)
     handler.rotator = _noop_rotator
 
     formatter = logging.Formatter(
@@ -54,12 +63,12 @@ def _create_logger():
         datefmt="%Y-%m-%dT%H:%M:%S",
     )
     handler.setFormatter(formatter)
-    logger.addHandler(handler)
+    file_logger.addHandler(handler)
 
-    return logger
+    return file_logger
 
 
-_logger = _create_logger()
+_logger = create_file_logger("connection", "connection.log")
 
 
 def _extract_client_info(request):

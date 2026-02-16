@@ -33,6 +33,7 @@ from src.calibration_manager import get_calibration_for_role, save_calibration_f
 from src.ai_engine import GeminiBrain
 import robot_api
 from lib.connection_logger import log_webrtc_connect, log_webrtc_disconnect, log_ws_connect, log_ws_disconnect, log_stream_start, log_stream_end
+from lib.connection_logger import create_file_logger
 
 if WEBRTC_AVAILABLE:
     from src.webrtc.video_track import OpenCVVideoCapture, BlackVideoTrack
@@ -40,6 +41,10 @@ if WEBRTC_AVAILABLE:
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# File logging — server events + HTTP access log
+_server_file_logger = create_file_logger("server_file", "server.log")
+_access_file_logger = create_file_logger("aiohttp.access", "access.log")
 
 # Global instances
 brain: GeminiBrain = None
@@ -883,11 +888,13 @@ async def handle_offer(request):
     active_tracks[pc_id] = {}
     
     logger.info(f"New WebRTC connection: {pc_id}, roles: {requested_roles}")
+    _server_file_logger.info(f"WEBRTC_NEW pc_id={pc_id} roles={requested_roles}")
     log_webrtc_connect(request, pc_id, requested_roles)
     
     @pc.on("connectionstatechange")
     async def on_connectionstatechange():
         logger.info(f"Connection state: {pc.connectionState}")
+        _server_file_logger.info(f"WEBRTC_STATE pc_id={pc_id} state={pc.connectionState}")
         if pc.connectionState == "failed" or pc.connectionState == "closed":
             log_webrtc_disconnect(pc_id)
             await pc.close()
@@ -1286,4 +1293,5 @@ if __name__ == '__main__':
     
     app = create_app()
     logger.info(f"Starting Scene Init Server on port {args.port}")
-    web.run_app(app, host='0.0.0.0', port=args.port)
+    access_logger = logging.getLogger("aiohttp.access")
+    web.run_app(app, host='0.0.0.0', port=args.port, access_log=access_logger)
