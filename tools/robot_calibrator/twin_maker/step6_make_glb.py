@@ -44,7 +44,7 @@ def process_dice_twin(json_input_path, glb_output_path):
         # Geometry Creation
         # We assume 'dice' is a cube. Let's give it a base size.
         # Since positions are around ~80 units, a size of 4.0 ensures visibility.
-        mesh = trimesh.creation.box(extents=[4.0, 4.0, 4.0])
+        mesh = trimesh.creation.box(extents=[0.02, 0.02, 0.02])
         
         # Apply Color
         color_name = props.get('color', 'gray')
