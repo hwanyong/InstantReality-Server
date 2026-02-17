@@ -19,25 +19,6 @@ try:
     from aiortc import RTCPeerConnection, RTCSessionDescription, RTCRtpSender
     from aiortc.contrib.media import MediaRelay
     WEBRTC_AVAILABLE = True
-
-    # Monkey-patch: disable aioice mDNS to prevent WinError 10065
-    # on Windows hosts where multicast sockets fail.
-    # Returns a stub protocol whose resolve() passes hostnames through.
-    try:
-        import aioice.mdns as _mdns_mod
-
-        class _MdnsStub:
-            async def resolve(self, host):
-                return host  # pass .local hostnames through as-is
-            def close(self):
-                pass
-
-        async def _noop_mdns():
-            return _MdnsStub()
-        _mdns_mod.create_mdns_protocol = _noop_mdns
-    except Exception:
-        pass  # aioice internals changed — skip silently
-
 except ImportError:
     WEBRTC_AVAILABLE = False
     logging.warning("aiortc not installed - WebRTC disabled")
@@ -788,13 +769,31 @@ async def handle_ik_calculate(request):
 # WebRTC Handlers
 # =============================================================================
 
+def _strip_mdns_candidates(sdp):
+    """
+    Remove mDNS (.local) ICE candidates from SDP.
+
+    On Windows, aioice's mDNS resolver crashes with WinError 10065
+    (multicast socket failure) or causes infinite recursion.
+    Browsers always include IP-based candidates alongside .local ones,
+    so stripping .local candidates is safe — ICE falls back to IP.
+    """
+    lines = sdp.split("\r\n")
+    filtered = [
+        line for line in lines
+        if not (line.startswith("a=candidate:") and ".local" in line)
+    ]
+    return "\r\n".join(filtered)
+
+
 async def handle_offer(request):
     """POST /offer - WebRTC SDP negotiation"""
     if not WEBRTC_AVAILABLE:
         return web.json_response({"error": "WebRTC not available"}, status=503)
     
     params = await request.json()
-    offer = RTCSessionDescription(sdp=params["sdp"], type=params["type"])
+    sdp = _strip_mdns_candidates(params["sdp"])
+    offer = RTCSessionDescription(sdp=sdp, type=params["type"])
     
     # Support role-based camera selection (e.g., ["topview", "quarterview"])
     requested_roles = params.get("roles", [])
