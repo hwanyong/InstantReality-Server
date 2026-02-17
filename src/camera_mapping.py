@@ -3,7 +3,13 @@
 
 import json
 import os
-from pyusbcameraindex import enumerate_usb_video_devices_windows
+import platform
+
+try:
+    from pyusbcameraindex import enumerate_usb_video_devices_windows
+    _HAS_USB_ENUM = True
+except ImportError:
+    _HAS_USB_ENUM = False
 
 # Config file path (project root)
 CONFIG_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "camera_config.json")
@@ -31,6 +37,8 @@ def get_available_devices():
     Enumerate all connected USB video devices.
     Returns list of dicts: {index, name, vid, pid, path}
     """
+    if not _HAS_USB_ENUM:
+        return []
     devices = enumerate_usb_video_devices_windows()
     return [
         {

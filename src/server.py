@@ -32,6 +32,7 @@ from src.camera_mapping import get_index_by_role, get_available_devices, match_r
 from src.calibration_manager import get_calibration_for_role, save_calibration_for_role, build_camera_metadata
 from src.ai_engine import GeminiBrain
 import robot_api
+from plan_executor import PlanExecutor
 from lib.connection_logger import log_webrtc_connect, log_webrtc_disconnect, log_ws_connect, log_ws_disconnect, log_stream_start, log_stream_end
 from lib.connection_logger import create_file_logger
 
@@ -48,6 +49,7 @@ _access_file_logger = create_file_logger("aiohttp.access", "access.log")
 
 # Global instances
 brain: GeminiBrain = None
+plan_executor: PlanExecutor = None
 SCENE_INVENTORY = []
 TWIN_CACHE = {'json': None, 'glb': None}  # Cached twin data
 
@@ -393,128 +395,24 @@ async def handle_gemini_analyze(request):
     return web.json_response(result)
 
 
-async def handle_gemini_execute(request):
-    """POST /api/gemini/execute - Generate robot execution plan via Function Calling.
-    
+async def handle_plan_start(request):
+    """POST /api/plan/start - Start server-driven plan execution.
+
     Body: { "instruction": "Pick up the red pen" }
-    Returns the plan. Execution is handled client-side step by step.
+    Returns plan_id immediately. Execution runs as background task,
+    streaming progress via WebSocket events.
     """
     if not request.body_exists:
         return web.json_response({"error": "Missing request body"}, status=400)
-    
+
     data = await request.json()
     instruction = data.get("instruction", "").strip()
-    
+
     if not instruction:
         return web.json_response({"error": "instruction is required"}, status=400)
-    
-    # Capture frame from TopView camera
-    topview_idx = get_index_by_role("TopView")
-    if topview_idx is None:
-        return web.json_response({"error": "TopView camera not configured"}, status=400)
-    
-    topview_cam = get_camera(topview_idx)
-    frame_bgr, _ = topview_cam.get_frames()
-    
-    if frame_bgr is None:
-        return web.json_response({"error": "Failed to capture frame"}, status=500)
-    
-    # Generate execution plan via Function Calling
-    plan = await asyncio.to_thread(brain.execute_with_tools, frame_bgr, instruction)
-    
-    return web.json_response(plan)
 
-
-async def handle_verify(request):
-    """POST /api/robot/verify
-    Verify robot action using arm-mounted camera.
-    Uses cached role→index mapping + get_camera() to avoid USB re-scan.
-
-    Body: { arm: "right"|"left", step_type: "move_arm"|"gripper", context: "..." }
-    """
-    if not request.body_exists:
-        return web.json_response({"verified": False, "description": "Missing body"}, status=400)
-
-    data = await request.json()
-    arm = data.get("arm", "right")
-    step_type = data.get("step_type", "move_arm")
-    context = data.get("context", "")
-
-    role_map = {"right": "RightRobot", "left": "LeftRobot"}
-    role = role_map.get(arm)
-    if not role:
-        return web.json_response({"verified": False, "description": f"Unknown arm: {arm}"}, status=400)
-
-    # Get camera index (cached — no USB scan)
-    idx = get_index_by_role(role)
-    if idx is None:
-        return web.json_response({
-            "verified": True,
-            "description": f"Camera {role} not available, skipping verification"
-        })
-
-    # Get frame from cached camera (no USB scan)
-    try:
-        cam = get_camera(idx)
-        frame_bgr, _ = cam.get_frames()
-        if frame_bgr is None:
-            return web.json_response({
-                "verified": True,
-                "description": "No frame captured, skipping verification"
-            })
-    except Exception as e:
-        return web.json_response({
-            "verified": True,
-            "description": f"Camera error: {e}, skipping verification"
-        })
-
-    # Call AI verification using existing brain singleton
-    try:
-        result = await asyncio.to_thread(brain.verify_action, frame_bgr, step_type, context)
-
-        # Apply gripper-camera offset compensation
-        if step_type == "move_arm" and result.get("offset"):
-            from calibration_manager import get_gripper_offsets
-            offsets = get_gripper_offsets()
-            arm_offset = offsets.get(arm, {"dx": 0, "dy": 0})
-            raw_dx = result["offset"].get("dx", 0)
-            raw_dy = result["offset"].get("dy", 0)
-            result["offset"]["dx"] = raw_dx + arm_offset.get("dx", 0)
-            result["offset"]["dy"] = raw_dy + arm_offset.get("dy", 0)
-            logger.info(f"[VERIFY] Gripper offset applied: raw({raw_dx},{raw_dy}) + cam({arm_offset}) = ({result['offset']['dx']},{result['offset']['dy']})")
-
-        return web.json_response(result)
-    except Exception as e:
-        return web.json_response({
-            "verified": True,
-            "description": f"AI error: {e}, skipping verification"
-        })
-
-async def handle_coord_convert(request):
-    """POST /api/coord/convert - Convert Gemini 0-1000 coords to robot mm.
-
-    Body: { "gx": 600, "gy": 550 }
-    Response: { "x": 65.1, "y": -9.5, "arm": "right" }
-    """
-    data = await request.json()
-    gx = float(data.get("gx", 500))
-    gy = float(data.get("gy", 500))
-
-    from calibration_manager import get_calibration_for_role
-    from lib.coordinate_transform import gemini_to_robot
-
-    cal = get_calibration_for_role("TopView")
-    if not cal or not cal.get("homography_matrix"):
-        return web.json_response({"error": "No TopView calibration"}, status=400)
-
-    H = cal["homography_matrix"]
-    res = cal.get("resolution", {})
-    robot = gemini_to_robot(gx, gy, H, res.get("width", 1920), res.get("height", 1080))
-    rx = round(robot["x"], 1)
-    ry = round(robot["y"], 1)
-    arm = "left" if rx < 0 else "right"
-
-    return web.json_response({"x": rx, "y": ry, "arm": arm})
+    result = await plan_executor.start(instruction)
+    return web.json_response(result)
 
 
 # =============================================================================
@@ -988,7 +886,15 @@ async def handle_websocket(request):
     
     try:
         async for msg in ws:
-            pass  # Keep-alive
+            if msg.type == web.WSMsgType.TEXT:
+                try:
+                    data = json.loads(msg.data)
+                    msg_type = data.get("type", "")
+                    if msg_type == "plan:abort" and plan_executor:
+                        await plan_executor.abort()
+                        logger.info("[WS] plan:abort received")
+                except json.JSONDecodeError:
+                    pass
     finally:
         ws_clients.discard(ws)
         logger.info(f"WebSocket client disconnected. Total: {len(ws_clients)}")
@@ -1106,11 +1012,20 @@ async def start_camera_polling():
 
 async def init_app():
     """Initialize application"""
-    global brain
+    global brain, plan_executor
     
     # Initialize Gemini brain
     brain = GeminiBrain()
     logger.info("Gemini brain initialized")
+    
+    # Initialize Plan Executor (server-driven orchestration)
+    controller = robot_api.get_controller()
+    plan_executor = PlanExecutor(
+        brain=brain,
+        controller=controller,
+        ws_broadcast=ws_broadcast
+    )
+    logger.info("PlanExecutor initialized")
     
     # Register WebRTC cleanup on camera refresh
     on_camera_refresh(invalidate_source_tracks)
@@ -1213,9 +1128,7 @@ def create_app():
         web.get('/api/scene', handle_scene_get),
         # Gemini API
         web.post('/api/gemini/analyze', handle_gemini_analyze),
-        web.post('/api/gemini/execute', handle_gemini_execute),
-        web.post('/api/robot/verify', handle_verify),
-        web.post('/api/coord/convert', handle_coord_convert),
+        web.post('/api/plan/start', handle_plan_start),
         # Twin API
         web.post('/api/twin/generate', handle_twin_generate),
         web.get('/api/twin/scene.json', handle_twin_json),
@@ -1253,8 +1166,11 @@ def create_app():
         cors.add(app.router.add_route('POST', '/offer', handle_offer))
         cors.add(app.router.add_route('POST', '/pause_camera', handle_pause_camera))
         cors.add(app.router.add_route('POST', '/pause_camera_client', handle_pause_camera_client))
-        app.router.add_get('/ws', handle_websocket)
-        logger.info("WebRTC routes registered: /offer, /ws, /pause_camera, /pause_camera_client")
+        logger.info("WebRTC routes registered: /offer, /pause_camera, /pause_camera_client")
+
+    # WebSocket route (independent of WebRTC — used for plan progress)
+    app.router.add_get('/ws', handle_websocket)
+    logger.info("WebSocket route registered: /ws")
     
     # Robot API routes
     robot_api.setup_routes(app)

@@ -9,3 +9,4 @@ aiohttp
 aiohttp-cors
 pyusbcameraindex
 python-dotenv
+pyyaml

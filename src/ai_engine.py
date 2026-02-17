@@ -6,6 +6,7 @@ import numpy as np
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
+from lib.config_loader import load_prompt, load_tools
 
 load_dotenv()
 
@@ -415,83 +416,15 @@ Rules:
             if image_bytes is None:
                 return {"error": "Failed to encode frame", "steps": []}
 
-            # Define robot tools for Function Calling
-            robot_tools = types.Tool(
-                function_declarations=[
-                    types.FunctionDeclaration(
-                        name="move_arm",
-                        description="Move robot arm to a position in the image. Specify x,y as image coordinates (0-1000 normalized).",
-                        parameters=types.Schema(
-                            type="OBJECT",
-                            properties={
-                                "x": types.Schema(type="NUMBER", description="X position in image (0=left edge, 1000=right edge)"),
-                                "y": types.Schema(type="NUMBER", description="Y position in image (0=top edge, 1000=bottom edge)"),
-                                "z": types.Schema(type="NUMBER", description="Z height in mm. 0=table surface, default 1"),
-                                "arm": types.Schema(type="STRING", description="Which arm: 'left', 'right', or 'auto'"),
-                                "orientation": types.Schema(type="NUMBER", description="Object edge angle in degrees (0-90). 0=edge aligned with image X-axis. Helps gripper align to object edges for optimal grasp."),
-                            },
-                            required=["x", "y"]
-                        )
-                    ),
-                    types.FunctionDeclaration(
-                        name="open_gripper",
-                        description="Open the gripper to release an object",
-                        parameters=types.Schema(
-                            type="OBJECT",
-                            properties={
-                                "arm": types.Schema(type="STRING", description="Which arm: 'left' or 'right'"),
-                            },
-                            required=["arm"]
-                        )
-                    ),
-                    types.FunctionDeclaration(
-                        name="close_gripper",
-                        description="Close the gripper to grasp an object",
-                        parameters=types.Schema(
-                            type="OBJECT",
-                            properties={
-                                "arm": types.Schema(type="STRING", description="Which arm: 'left' or 'right'"),
-                            },
-                            required=["arm"]
-                        )
-                    ),
-                    types.FunctionDeclaration(
-                        name="go_home",
-                        description="Move the robot arm to its home (resting) position",
-                        parameters=types.Schema(
-                            type="OBJECT",
-                            properties={
-                                "arm": types.Schema(type="STRING", description="Which arm: 'left', 'right', or 'both'"),
-                            },
-                            required=["arm"]
-                        )
-                    ),
-                ]
-            )
+            # Load tool definitions from external YAML
+            tool_declarations = load_tools()
+            robot_tools = types.Tool(function_declarations=tool_declarations)
 
-            prompt = f"""You are a robot control planner.
-
-The user instruction is: "{instruction}"
-
-Analyze the image and create an execution plan using the available robot tools.
-
-## Coordinate System
-- Use image coordinates: x (0=left, 1000=right), y (0=top, 1000=bottom)
-- The image shows a top-down view of the robot workspace
-- Left arm handles the left half of the image (x < 500), Right arm handles the right half (x >= 500)
-- Identify object positions by looking at the image and specify their x,y location
-
-## Planning Rules
-- For pick-and-place tasks, follow this sequence:
-  1. open_gripper → 2. move_arm (to object) → 3. close_gripper → 4. move_arm (to destination) → 5. open_gripper → 6. go_home
-- move_arm does NOT affect the gripper. Gripper state is preserved during arm movement.
-- Do NOT skip steps. Call each tool function in order.
-
-## Gripper Orientation
-- For graspable objects, estimate `orientation` (0-90°): the angle of the nearest edge relative to horizontal.
-- Square/cube objects: use the nearest edge angle (4-fold symmetry, so 0-90° range).
-- Rectangular objects: use the short-axis angle for best grip (0-180° range, mod 90).
-- Round objects: omit orientation (not needed)."""
+            # Load prompt template from external Markdown
+            prompt_template = load_prompt("execute_planner")
+            if not prompt_template:
+                return {"error": "Failed to load execute_planner prompt", "steps": []}
+            prompt = prompt_template.format(instruction=instruction)
 
             response = self.client.models.generate_content(
                 model=self.model_name,
@@ -618,49 +551,15 @@ Analyze the image and create an execution plan using the available robot tools.
             if image_bytes is None:
                 return {"verified": False, "description": "Failed to encode frame"}
 
+            # Load verification prompt from external Markdown
             if step_type == "move_arm":
-                prompt = f"""You are a robot verification assistant.
-This image is from a camera mounted on the robot gripper, looking straight down.
-The gripper approaches from the bottom of the image.
-Task context: "{context}"
-
-Determine if the gripper is correctly positioned directly above the target object.
-If the object is NOT centered under the gripper, estimate the offset in millimeters.
-- dx: positive = target is to the RIGHT of image center
-- dy: positive = target is ABOVE image center (toward the top of the image)
-
-IMPORTANT: Report WHERE THE TARGET IS relative to center, not which direction to move.
-
-Respond in JSON:
-{{
-    "verified": true/false,
-    "description": "brief explanation",
-    "offset": {{"dx": 0, "dy": 0}}
-}}
-
-If the target object is centered or very close (within 2mm), set verified=true and offset to 0,0.
-"""
+                prompt_template = load_prompt("verify_position")
             else:
-                prompt = f"""You are a robot verification assistant.
-This image is from a camera mounted on the robot gripper, looking downward.
-Task context: "{context}"
+                prompt_template = load_prompt("verify_gripper")
 
-Determine if the gripper has successfully grasped/released the object.
-If the action failed, suggest correction steps.
-
-Respond in JSON:
-{{
-    "verified": true/false,
-    "description": "brief explanation",
-    "correction_steps": []
-}}
-
-For correction_steps, use these tool formats:
-- {{"tool": "move_arm", "args": {{"x": 0, "y": 0, "z": 1}}}}
-- {{"tool": "open_gripper", "args": {{"arm": "right"}}}}
-- {{"tool": "close_gripper", "args": {{"arm": "right"}}}}
-Leave correction_steps empty if verified is true.
-"""
+            if not prompt_template:
+                return {"verified": False, "description": "Failed to load verification prompt"}
+            prompt = prompt_template.format(context=context)
 
             response = self.client.models.generate_content(
                 model=self.model_name,

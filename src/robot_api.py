@@ -172,6 +172,12 @@ async def handle_move_to(request):
     motion_time = data.get("motion_time", 2.0)
     orientation = data.get("orientation", None)
 
+    # Enforce minimum Z height from execution config (table collision avoidance)
+    from lib.config_loader import load_execution_config
+    exec_config = load_execution_config()
+    min_z = exec_config.get("safety", {}).get("min_z_mm", 5)
+    z = max(min_z, z)
+
     # Auto arm selection: x < 0 -> left, x >= 0 -> right
     if arm == "auto":
         arm = "left_arm" if x < 0 else "right_arm"
