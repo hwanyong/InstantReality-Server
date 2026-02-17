@@ -19,6 +19,17 @@ try:
     from aiortc import RTCPeerConnection, RTCSessionDescription, RTCRtpSender
     from aiortc.contrib.media import MediaRelay
     WEBRTC_AVAILABLE = True
+
+    # Monkey-patch: disable aioice mDNS to prevent WinError 10065
+    # on Windows hosts where multicast sockets fail.
+    try:
+        import aioice.mdns as _mdns_mod
+        async def _noop_mdns():
+            return None
+        _mdns_mod.create_mdns_protocol = _noop_mdns
+    except Exception:
+        pass  # aioice internals changed — skip silently
+
 except ImportError:
     WEBRTC_AVAILABLE = False
     logging.warning("aiortc not installed - WebRTC disabled")
@@ -856,9 +867,16 @@ async def handle_offer(request):
             logger.error(f"Failed to add track for camera {idx}: {e}")
     
     # THEN setRemoteDescription (original server.py pattern)
-    await pc.setRemoteDescription(offer)
-    answer = await pc.createAnswer()
-    await pc.setLocalDescription(answer)
+    try:
+        await pc.setRemoteDescription(offer)
+        answer = await pc.createAnswer()
+        await pc.setLocalDescription(answer)
+    except OSError as e:
+        logger.error(f"ICE/mDNS socket error during offer negotiation: {e}")
+        await pc.close()
+        pcs.discard(pc)
+        active_tracks.pop(pc_id, None)
+        return web.json_response({"error": f"WebRTC negotiation failed: {e}"}, status=500)
     
     # Build camera metadata for mapped roles
     camera_metadata = {}
