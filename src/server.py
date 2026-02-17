@@ -22,10 +22,18 @@ try:
 
     # Monkey-patch: disable aioice mDNS to prevent WinError 10065
     # on Windows hosts where multicast sockets fail.
+    # Returns a stub protocol whose resolve() passes hostnames through.
     try:
         import aioice.mdns as _mdns_mod
+
+        class _MdnsStub:
+            async def resolve(self, host):
+                return host  # pass .local hostnames through as-is
+            def close(self):
+                pass
+
         async def _noop_mdns():
-            return None
+            return _MdnsStub()
         _mdns_mod.create_mdns_protocol = _noop_mdns
     except Exception:
         pass  # aioice internals changed — skip silently
