@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Config Editor — Gemini Robotics</title>
+    <meta name="description" content="Edit prompts and config files for Gemini Robotics Control">
+    <link rel="stylesheet" href="styles.css">
+    <style>
+        /* Editor Layout */
+        .editor-layout {
+            display: grid;
+            grid-template-columns: 200px 1fr;
+            grid-template-rows: 1fr auto;
+            height: calc(100vh - 60px);
+            gap: 0;
+        }
+
+        /* File Sidebar */
+        .file-sidebar {
+            grid-row: 1 / -1;
+            background: var(--bg-card);
+            border-right: 1px solid var(--border-color);
+            padding: 12px 0;
+            overflow-y: auto;
+        }
+
+        .file-sidebar h3 {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            padding: 0 14px;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .file-list {
+            list-style: none;
+        }
+
+        .file-item {
+            padding: 8px 14px;
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: all 0.15s ease;
+            border-left: 3px solid transparent;
+        }
+
+        .file-item:hover {
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+        }
+
+        .file-item.active {
+            background: rgba(88, 166, 255, 0.08);
+            color: var(--accent);
+            border-left-color: var(--accent);
+        }
+
+        .file-item .file-icon {
+            font-size: 0.75rem;
+            opacity: 0.7;
+        }
+
+        .file-item .file-name {
+            flex: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .file-item .dirty-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--warning);
+            display: none;
+        }
+
+        .file-item.dirty .dirty-dot {
+            display: block;
+        }
+
+        /* Editor Area */
+        .editor-area {
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+            background: var(--bg-primary);
+        }
+
+        .editor-toolbar {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 16px;
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .editor-toolbar .file-path {
+            flex: 1;
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            font-family: 'Consolas', monospace;
+        }
+
+        .editor-toolbar .btn {
+            padding: 5px 12px;
+            font-size: 0.75rem;
+        }
+
+        #editor-textarea {
+            flex: 1;
+            width: 100%;
+            padding: 16px;
+            background: var(--bg-primary);
+            border: none;
+            color: var(--text-primary);
+            font-family: 'Consolas', 'SF Mono', 'Menlo', monospace;
+            font-size: 0.85rem;
+            line-height: 1.6;
+            resize: none;
+            outline: none;
+            tab-size: 2;
+        }
+
+        #editor-textarea::placeholder {
+            color: var(--text-secondary);
+            opacity: 0.5;
+        }
+
+        .editor-empty {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex: 1;
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+        }
+
+        /* Quick Test Dock */
+        .test-dock {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            padding: 12px 16px;
+            background: var(--bg-card);
+            border-top: 1px solid var(--border-color);
+            max-height: 200px;
+        }
+
+        .test-panel {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .test-panel h3 {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            margin: 0;
+        }
+
+        .test-input-row {
+            display: flex;
+            gap: 6px;
+        }
+
+        .test-input-row input {
+            flex: 1;
+            padding: 6px 10px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            color: var(--text-primary);
+            font-size: 0.8rem;
+        }
+
+        .test-input-row input:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+
+        .test-input-row .btn {
+            padding: 6px 10px;
+            font-size: 0.75rem;
+            white-space: nowrap;
+        }
+
+        #test-result {
+            flex: 1;
+            padding: 8px;
+            background: var(--bg-secondary);
+            border-radius: 6px;
+            font-family: 'Consolas', monospace;
+            font-size: 0.7rem;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            color: var(--text-secondary);
+            min-height: 40px;
+            max-height: 100px;
+        }
+
+        /* Task steps in test dock */
+        #task-steps {
+            flex: 1;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+        }
+
+        .step-item {
+            padding: 4px 8px;
+            background: var(--bg-secondary);
+            border-radius: 4px;
+            font-size: 0.7rem;
+            font-family: 'Consolas', monospace;
+            color: var(--text-primary);
+        }
+
+        .step-item[data-status="running"] {
+            background: rgba(59, 130, 246, 0.1);
+            border-left: 2px solid #3b82f6;
+        }
+
+        .step-item[data-status="done"] {
+            border-left: 2px solid var(--success);
+        }
+
+        .step-item[data-status="error"] {
+            border-left: 2px solid var(--danger);
+        }
+
+        .step-empty {
+            font-size: 0.7rem;
+            color: var(--text-secondary);
+        }
+
+        /* Keyboard shortcut hint */
+        .shortcut-hint {
+            font-size: 0.65rem;
+            color: var(--text-secondary);
+            opacity: 0.6;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="app">
+        <!-- Header -->
+        <header class="header">
+            <h1>📝 Config Editor</h1>
+            <div class="status-bar">
+                <nav class="nav-links">
+                    <a href="index.html">🤖 Control</a>
+                    <a href="calibration.html">🎯 Calibration</a>
+                    <a href="settings.html">⚙️ Settings</a>
+                </nav>
+            </div>
+        </header>
+
+        <main class="editor-layout">
+            <!-- File Sidebar -->
+            <aside class="file-sidebar">
+                <h3>📁 Config Files</h3>
+                <ul id="file-list" class="file-list">
+                    <li class="file-item" style="color:var(--text-secondary);font-size:0.75rem;cursor:default;">
+                        Loading...
+                    </li>
+                </ul>
+            </aside>
+
+            <!-- Editor Area -->
+            <section class="editor-area">
+                <div class="editor-toolbar">
+                    <span id="file-path" class="file-path">No file selected</span>
+                    <span class="shortcut-hint">⌘S Save</span>
+                    <button id="revert-btn" class="btn" disabled>↩️ Revert</button>
+                    <button id="save-btn" class="btn-primary" style="width:auto;padding:5px 14px;font-size:0.75rem" disabled>💾 Save</button>
+                </div>
+                <textarea id="editor-textarea" placeholder="← Select a file to edit" disabled></textarea>
+            </section>
+
+            <!-- Quick Test Dock -->
+            <section class="test-dock">
+                <div class="test-panel">
+                    <h3>💬 Quick Test</h3>
+                    <div class="test-input-row">
+                        <input id="test-input" type="text" placeholder="예: 빨간 펜을 집어줘">
+                        <button id="test-analyze-btn" class="btn">🚀 Analyze</button>
+                        <button id="test-execute-btn" class="btn" style="background:#10b981;color:#fff">⚡ Execute</button>
+                    </div>
+                    <pre id="test-result">Waiting...</pre>
+                </div>
+                <div class="test-panel">
+                    <h3>📝 Task Plan</h3>
+                    <div id="task-steps">
+                        <span class="step-empty">No plan yet</span>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script type="module" src="editor.mjs"></script>
+</body>
+
+</html>
