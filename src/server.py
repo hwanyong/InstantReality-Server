@@ -616,6 +616,78 @@ async def handle_roi_save(request):
 
 
 # =============================================================================
+# Config Editor API — editable config files via web UI
+# =============================================================================
+
+# Security whitelist: only these keys map to real files
+_EDITABLE_CONFIG_FILES = {
+    "execute_planner":  "prompts/execute_planner.md",
+    "verify_position":  "prompts/verify_position.md",
+    "verify_gripper":   "prompts/verify_gripper.md",
+    "execution_config": "execution_config.yaml",
+}
+
+_CONFIG_DIR = Path(__file__).parent / "config"
+
+
+async def handle_config_files(request):
+    """GET /api/config/files - List editable config files with metadata"""
+    files = []
+    for key, rel_path in _EDITABLE_CONFIG_FILES.items():
+        full_path = _CONFIG_DIR / rel_path
+        entry = {"name": key, "path": rel_path, "exists": full_path.exists()}
+        if full_path.exists():
+            entry["mtime"] = full_path.stat().st_mtime
+            entry["size"] = full_path.stat().st_size
+        files.append(entry)
+    return web.json_response({"files": files})
+
+
+async def handle_config_file_get(request):
+    """GET /api/config/file/{name} - Read config file content"""
+    name = request.match_info.get("name", "")
+    rel_path = _EDITABLE_CONFIG_FILES.get(name)
+    if not rel_path:
+        return web.json_response({"error": f"Unknown config: {name}"}, status=404)
+
+    full_path = _CONFIG_DIR / rel_path
+    if not full_path.exists():
+        return web.json_response({"error": f"File not found: {rel_path}"}, status=404)
+
+    content = full_path.read_text(encoding="utf-8")
+    return web.json_response({
+        "name": name,
+        "path": rel_path,
+        "content": content,
+        "mtime": full_path.stat().st_mtime,
+    })
+
+
+async def handle_config_file_save(request):
+    """PUT /api/config/file/{name} - Save config file content"""
+    name = request.match_info.get("name", "")
+    rel_path = _EDITABLE_CONFIG_FILES.get(name)
+    if not rel_path:
+        return web.json_response({"error": f"Unknown config: {name}"}, status=404)
+
+    data = await request.json()
+    content = data.get("content")
+    if content is None:
+        return web.json_response({"error": "content field required"}, status=400)
+
+    full_path = _CONFIG_DIR / rel_path
+    full_path.write_text(content, encoding="utf-8")
+    logger.info(f"[ConfigEditor] Saved: {rel_path}")
+
+    return web.json_response({
+        "success": True,
+        "name": name,
+        "path": rel_path,
+        "mtime": full_path.stat().st_mtime,
+    })
+
+
+# =============================================================================
 # Servo Config API
 # =============================================================================
 
@@ -1172,6 +1244,10 @@ def create_app():
         # ROI API
         web.get('/api/roi', handle_roi_get),
         web.post('/api/roi', handle_roi_save),
+        # Config Editor API
+        web.get('/api/config/files', handle_config_files),
+        web.get('/api/config/file/{name}', handle_config_file_get),
+        web.put('/api/config/file/{name}', handle_config_file_save),
         # Servo Config API
         web.get('/api/servo_config', handle_servo_config_get),
         web.post('/api/servo_config', handle_servo_config_save),
