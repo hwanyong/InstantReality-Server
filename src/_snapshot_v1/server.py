@@ -243,6 +243,11 @@ async def pause_camera_handler(request):
         return web.json_response({"success": False, "error": str(e)}, status=500)
 
 if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description='InstantReality Server v1')
+    parser.add_argument('--port', '-p', type=int, default=8080, help='Port number (default: 8080)')
+    args = parser.parse_args()
+    
     # 1. Discover and start cameras at server boot (Broadcast Mode)
     print("Discovering and initializing cameras...")
     discovered_indices = discover_cameras(max_indices=4)
@@ -268,5 +273,5 @@ if __name__ == "__main__":
     app.router.add_get("/sdk/example.html", serve_sdk_example)
     app.on_shutdown.append(on_shutdown)
     
-    print("Server started at http://localhost:8080")
-    web.run_app(app, port=8080)
+    print(f"Server started at http://localhost:{args.port}")
+    web.run_app(app, port=args.port)

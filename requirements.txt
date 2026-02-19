@@ -1,9 +1,12 @@
 opencv-python
 pyserial
 numpy
+trimesh
+scipy
 aiortc
 google-genai
 aiohttp
 aiohttp-cors
 pyusbcameraindex
 python-dotenv
+pyyaml

@@ -1,0 +1,559 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Robot Calibration - Gemini Robotics</title>
+    <meta name="description" content="AI-powered automatic robot calibration using Gemini vision">
+    <link rel="stylesheet" href="styles.css">
+    <style>
+        /* Layout C - Bottom Docked */
+        .layout-c {
+            display: flex;
+            flex-direction: column;
+            height: calc(100vh - 60px);
+            padding: 0;
+        }
+
+        /* TopView Area */
+        .topview-area {
+            flex: 1;
+            min-height: 0;
+            padding: 16px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background: var(--bg-primary);
+        }
+
+        #topview-container {
+            position: relative;
+            width: 100%;
+            height: 100%;
+        }
+
+        #topview-container video {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            border: 2px solid var(--accent);
+            border-radius: 8px;
+            background: #000;
+        }
+
+        #overlay-svg {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: auto;
+            border-radius: 8px;
+        }
+
+        #overlay-svg polygon {
+            pointer-events: auto;
+            fill: rgba(100, 200, 255, 0.15);
+            stroke: #64c8ff;
+            stroke-width: 2;
+        }
+
+        #overlay-svg circle.vertex {
+            pointer-events: auto;
+            cursor: pointer;
+            fill: #64c8ff;
+            transition: all 0.15s ease;
+        }
+
+        #overlay-svg circle.vertex:hover {
+            filter: drop-shadow(0 0 6px rgba(100, 200, 255, 0.8));
+        }
+
+        #overlay-svg circle.vertex.selected {
+            fill: #ffd43b;
+            stroke: #fff;
+            stroke-width: 2;
+            r: 12;
+        }
+
+        #overlay-svg circle.vertex.dragging {
+            opacity: 0.5;
+            r: 5;
+            cursor: grabbing;
+        }
+
+        #overlay-svg .vertex-label {
+            font-size: 10px;
+            font-family: Inter, sans-serif;
+            fill: #000;
+            text-anchor: middle;
+            dominant-baseline: central;
+            pointer-events: none;
+        }
+
+        #overlay-svg .marker {
+            pointer-events: auto;
+            cursor: pointer;
+        }
+
+        #overlay-svg .marker-label {
+            font-size: 12px;
+            font-weight: bold;
+            font-family: Inter, sans-serif;
+            fill: #fff;
+            text-anchor: middle;
+            dominant-baseline: central;
+            pointer-events: none;
+        }
+
+        #overlay-svg .delete-btn {
+            pointer-events: auto;
+            cursor: pointer;
+            fill: #f03e3e;
+        }
+
+        #overlay-svg .delete-btn:hover {
+            fill: #ff6b6b;
+        }
+
+        #topview-label {
+            position: absolute;
+            top: 12px;
+            left: 16px;
+            font-size: 12px;
+            color: var(--accent);
+            background: rgba(0, 0, 0, 0.7);
+            padding: 4px 10px;
+            border-radius: 4px;
+        }
+
+        /* Calibrated markers - auto-calculated positions */
+        #overlay-svg .calibrated-marker {
+            pointer-events: none;
+            animation: pulse 2s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+
+            0%,
+            100% {
+                opacity: 0.8;
+            }
+
+            50% {
+                opacity: 1;
+            }
+        }
+
+        #overlay-svg .share-point-marker {
+            fill: #22c55e;
+            stroke: #fff;
+            stroke-width: 3;
+        }
+
+        /* Main Toolbar */
+        .main-toolbar {
+            display: flex;
+            justify-content: center;
+            flex-wrap: wrap;
+            gap: 8px;
+            padding: 12px 16px;
+            background: var(--bg-secondary);
+            border-top: 1px solid var(--border-color);
+        }
+
+        .tool-btn {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 14px;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            color: var(--text-primary);
+            font-size: 0.85rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .tool-btn:hover {
+            background: var(--bg-secondary);
+            border-color: var(--accent);
+        }
+
+        .tool-btn.active {
+            background: var(--accent);
+            color: #000;
+            border-color: var(--accent);
+            font-weight: 600;
+        }
+
+        .tool-btn[data-tool="left-base"],
+        .tool-btn[data-tool="left-gripper"] {
+            border-color: #ff6b6b;
+        }
+
+        .tool-btn[data-tool="left-base"].active,
+        .tool-btn[data-tool="left-gripper"].active {
+            background: #ff6b6b;
+            border-color: #ff6b6b;
+        }
+
+        .tool-btn[data-tool="right-base"],
+        .tool-btn[data-tool="right-gripper"] {
+            border-color: #4dabf7;
+        }
+
+        .tool-btn[data-tool="right-base"].active,
+        .tool-btn[data-tool="right-gripper"].active {
+            background: #4dabf7;
+            border-color: #4dabf7;
+        }
+
+        .toolbar-divider {
+            width: 1px;
+            background: var(--border-color);
+            margin: 0 8px;
+            align-self: stretch;
+        }
+
+        /* Bottom Dock */
+        .bottom-dock {
+            height: 260px;
+            display: grid;
+            grid-template-columns: minmax(400px, 45%) 1fr;
+            gap: 16px;
+            padding: 12px 16px;
+            background: var(--bg-card);
+            border-top: 1px solid var(--border-color);
+        }
+
+        /* Sub Cameras */
+        .dock-cameras {
+            display: flex;
+            flex-direction: row;
+            gap: 12px;
+            overflow: hidden;
+        }
+
+        .dock-cameras .camera-item {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            min-width: 0;
+        }
+
+        .dock-cameras label {
+            font-size: 11px;
+            color: var(--text-secondary);
+            font-weight: 500;
+        }
+
+        .dock-cameras video {
+            width: 100%;
+            aspect-ratio: 4/3;
+            border-radius: 6px;
+            object-fit: cover;
+            background: #000;
+            border: 2px solid var(--border-color);
+        }
+
+        .dock-cameras .camera-item:first-child video {
+            border-color: var(--accent);
+        }
+
+        .pause-btn {
+            background: transparent;
+            border: none;
+            color: var(--text-secondary);
+            cursor: pointer;
+            font-size: 12px;
+            padding: 2px 6px;
+            border-radius: 4px;
+            transition: all 0.2s;
+            margin-left: 6px;
+        }
+
+        .pause-btn:hover {
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+        }
+
+        .pause-btn.paused {
+            color: var(--warning);
+            background: var(--bg-tertiary);
+        }
+
+        /* Tabs */
+        .dock-tabs {
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+        }
+
+        .tab-buttons {
+            display: flex;
+            gap: 4px;
+            margin-bottom: 8px;
+        }
+
+        .tab-btn {
+            padding: 8px 16px;
+            background: var(--bg-secondary);
+            border: none;
+            border-radius: 6px 6px 0 0;
+            color: var(--text-secondary);
+            cursor: pointer;
+            font-size: 0.8rem;
+            transition: all 0.2s;
+        }
+
+        .tab-btn:hover {
+            background: var(--bg-primary);
+        }
+
+        .tab-btn.active {
+            background: var(--accent);
+            color: #000;
+            font-weight: 600;
+        }
+
+        .tab-content {
+            flex: 1;
+            overflow: hidden;
+            background: var(--bg-secondary);
+            border-radius: 0 8px 8px 8px;
+            padding: 12px;
+        }
+
+        .tab-panel {
+            display: none;
+            height: 100%;
+            overflow-y: auto;
+        }
+
+        .tab-panel.active {
+            display: block;
+        }
+
+        /* Robot Control Tab */
+        .robot-control-compact {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            align-items: flex-start;
+        }
+
+        .robot-control-compact .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .robot-control-compact .btn-row {
+            display: flex;
+            gap: 6px;
+        }
+
+        .robot-control-compact .btn {
+            padding: 6px 12px;
+            font-size: 0.75rem;
+        }
+
+        .robot-status-inline {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            padding: 4px 8px;
+            background: var(--bg-card);
+            border-radius: 4px;
+        }
+
+        .speed-control {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .speed-control input[type="range"] {
+            width: 100px;
+            accent-color: var(--accent);
+        }
+
+        .speed-control span {
+            font-size: 0.75rem;
+            min-width: 30px;
+        }
+
+        /* JSON Preview Tab */
+        .json-preview-tab {
+            height: 100%;
+            font-family: 'Consolas', monospace;
+            font-size: 0.7rem;
+            background: var(--bg-card);
+            padding: 10px;
+            border-radius: 6px;
+            overflow: auto;
+            white-space: pre-wrap;
+            margin: 0;
+        }
+
+        /* Nav Links */
+        .nav-links {
+            display: flex;
+            gap: 12px;
+        }
+
+        .nav-links a {
+            color: var(--accent);
+            text-decoration: none;
+            font-size: 0.875rem;
+        }
+
+        .nav-links a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="app">
+        <!-- Header -->
+        <header class="header">
+            <h1>🎯 Robot Calibration</h1>
+            <div class="status-bar">
+                <nav class="nav-links">
+                    <a href="index.html">← Back to Control</a>
+                    <a href="settings.html">Settings</a>
+                </nav>
+                <span id="connection-status" class="status disconnected">● Disconnected</span>
+            </div>
+        </header>
+
+        <main class="layout-c">
+            <!-- TopView Area -->
+            <section class="topview-area">
+                <div id="topview-container">
+                    <video id="camera-0" autoplay playsinline muted></video>
+                    <svg id="overlay-svg" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet">
+                        <polygon id="workspace-polygon" points="" />
+                        <g id="vertex-group"></g>
+                        <g id="marker-group"></g>
+                    </svg>
+                    <div id="topview-label">🎯 TopView</div>
+                </div>
+            </section>
+
+            <!-- Main Toolbar -->
+            <div id="overlay-toolbar" class="main-toolbar">
+                <button id="tool-vertex" class="tool-btn active" data-tool="vertex">⬡ Add Vertex</button>
+                <button id="tool-clear" class="tool-btn" style="border-color: var(--danger);">🗑 Clear All</button>
+
+                <div class="toolbar-divider"></div>
+
+                <button id="calc-btn" class="tool-btn"
+                    style="border-color: #22c55e; background: #22c55e; color: #000; font-weight: 600;">🔗
+                    Calculate</button>
+                <button id="test-mode-btn" class="tool-btn" disabled style="border-color: #f59e0b;"
+                    title="캘리브레이션 완료 후 활성화">🎯 Test</button>
+
+                <div class="toolbar-divider"></div>
+
+                <button id="load-cal-btn" class="tool-btn">📂 Load</button>
+                <button id="save-cal-btn" class="tool-btn">💾 Save</button>
+                <button id="export-cal-btn" class="tool-btn">📤 Export</button>
+                <button id="capture-all-btn" class="tool-btn" title="전체 카메라 FHD 캡쳐 다운로드">📸 Capture</button>
+            </div>
+
+            <!-- Bottom Dock -->
+            <section class="bottom-dock">
+                <!-- Sub Cameras -->
+                <div class="dock-cameras">
+                    <div class="camera-item">
+                        <label>🎯 QuarterView <button class="pause-btn" data-role="QuarterView"
+                                title="일시정지">⏸</button></label>
+                        <video id="camera-1" autoplay playsinline muted></video>
+                    </div>
+                    <div class="camera-item">
+                        <label>RightRobot <button class="pause-btn" data-role="RightRobot"
+                                title="일시정지">⏸</button></label>
+                        <video id="camera-2" autoplay playsinline muted></video>
+                    </div>
+                    <div class="camera-item">
+                        <label>LeftRobot <button class="pause-btn" data-role="LeftRobot" title="일시정지">⏸</button></label>
+                        <video id="camera-3" autoplay playsinline muted></video>
+                    </div>
+                </div>
+
+                <!-- Tabs -->
+                <div class="dock-tabs">
+                    <div class="tab-buttons">
+                        <button class="tab-btn" data-tab="robot">🤖 Robot Control</button>
+                        <button class="tab-btn active" data-tab="json">💾 JSON Preview</button>
+                    </div>
+                    <div class="tab-content">
+                        <!-- Robot Control Tab -->
+                        <div id="tab-robot" class="tab-panel">
+                            <div class="robot-control-compact">
+                                <div class="control-group">
+                                    <span id="robot-status" class="robot-status-inline">Disconnected</span>
+                                    <div class="btn-row">
+                                        <button id="robot-connect-btn" class="btn btn-primary">🔌 Connect</button>
+                                        <button id="robot-disconnect-btn" class="btn btn-danger" disabled>⛔
+                                            Disconnect</button>
+                                    </div>
+                                </div>
+                                <div class="control-group">
+                                    <div class="btn-row">
+                                        <button id="go-home-btn" class="btn" disabled>🏠 Home</button>
+                                        <button id="go-zero-btn" class="btn" disabled>📐 Zero</button>
+                                    </div>
+                                    <div class="speed-control">
+                                        <label style="font-size: 0.7rem; color: var(--text-secondary);">Speed:</label>
+                                        <input type="range" id="motion-speed" min="0.5" max="5" step="0.5" value="3">
+                                        <span id="speed-value">3s</span>
+                                    </div>
+                                </div>
+                                <div class="control-group">
+                                    <div class="z-control" style="display: flex; align-items: center; gap: 6px;">
+                                        <label
+                                            style="font-size: 0.7rem; color: var(--text-secondary); min-width: 16px;">Z:</label>
+                                        <input type="range" id="test-z-range" min="-10" max="100" step="1" value="5"
+                                            style="width: 80px; accent-color: var(--accent);">
+                                        <input type="number" id="test-z-value" min="-10" max="100" step="1" value="5"
+                                            style="width: 54px; padding: 2px 4px; font-size: 0.75rem; background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 4px; text-align: right;">
+                                        <span style="font-size: 0.7rem; color: var(--text-secondary);">mm</span>
+                                    </div>
+                                    <div class="btn-row">
+                                        <button id="gripper-open-left" class="btn" disabled
+                                            style="font-size: 0.7rem; padding: 4px 8px; border-color: #ff6b6b;">🤚 L
+                                            Open</button>
+                                        <button id="gripper-close-left" class="btn" disabled
+                                            style="font-size: 0.7rem; padding: 4px 8px; border-color: #ff6b6b;">✊ L
+                                            Close</button>
+                                        <button id="gripper-open-right" class="btn" disabled
+                                            style="font-size: 0.7rem; padding: 4px 8px; border-color: #4dabf7;">🤚 R
+                                            Open</button>
+                                        <button id="gripper-close-right" class="btn" disabled
+                                            style="font-size: 0.7rem; padding: 4px 8px; border-color: #4dabf7;">✊ R
+                                            Close</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- JSON Preview Tab (default) -->
+                        <div id="tab-json" class="tab-panel active">
+                            <pre id="json-preview" class="json-preview-tab">No calibration data</pre>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script type="module" src="calibration.mjs"></script>
+</body>
+
+</html>

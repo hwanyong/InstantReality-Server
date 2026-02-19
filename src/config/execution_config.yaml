@@ -1,0 +1,27 @@
+# Execute pipeline configuration
+# All safety, verification, and motion parameters in one place
+# Previously hardcoded in app.mjs (L15-18) and scattered across ai_engine.py
+
+safety:
+  safe_height_mm: 100       # Height to ascend before horizontal moves
+  min_z_mm: 5               # Absolute minimum Z — enforced server-side
+  max_motion_time_sec: 10   # Maximum allowed motion time
+
+motion:
+  default_motion_time_sec: 2.0
+  approach_motion_time_sec: 1.0
+
+verification:
+  position:
+    tolerance_mm: 3          # Offset <= this → pass
+    damping_factor: 0.5      # Prevents overcorrection
+    max_retries: 3
+  gripper:
+    max_retries: 3
+    re_analyze_on_fail: true # Re-analyze TopView on grip failure
+
+execution:
+  step_delay_ms: 500         # Delay between steps
+  auto_connect: true         # Auto-connect robot on plan start
+  auto_disconnect: true      # Auto-disconnect on plan complete
+  home_before_plan: true     # Go home before first step

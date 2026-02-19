@@ -92,7 +92,7 @@ class CalibratorGUI:
     def __init__(self):
         self.root = tk.Tk()
         self.root.title("Robot Calibration Tool")
-        self.root.geometry("800x700")
+        self.root.geometry("900x850")
         self.root.configure(bg=THEME["bg"])
 
         # Initialize components
@@ -129,11 +129,18 @@ class CalibratorGUI:
         self.actuation_range_vars = {}  # Motor actuation range (180/270)
         self.constrain_var = None  # Slider constraint toggle
         self.pulse_ref_labels = {}  # Pulse reference (pulse_min) display labels
+        self.z_offset_vars = {}  # Per-arm Z offset calibration
+
+        # Position Presets UI variables
+        self.vertex_indicators = {}    # {1-8: StringVar for ownership indicator}
+        self.share_point_indicators = {}  # {"left_arm": StringVar, "right_arm": StringVar}
+        self.current_arm_tab = "left_arm"  # Track current active tab
 
         # Build UI
         self._create_styles()
         self._create_connection_panel()
         self._create_servo_panels()
+        self._create_position_presets_panel()
         self._create_diagnostics_panel()
         self._create_footer()
 
@@ -241,9 +248,30 @@ class CalibratorGUI:
         right_frame = ttk.Frame(notebook, padding=10)
         notebook.add(right_frame, text="Right Arm")
         self._create_arm_controls(right_frame, "right_arm", range(1, NUM_SLOTS + 1))
+        
+        # Track tab changes for Vertex recording
+        def on_tab_change(event):
+            selected_idx = notebook.index(notebook.select())
+            self.current_arm_tab = "left_arm" if selected_idx == 0 else "right_arm"
+        
+        notebook.bind("<<NotebookTabChanged>>", on_tab_change)
 
     def _create_arm_controls(self, parent, arm_key, slots):
         """Create control widgets for one arm with kinematics settings."""
+        # === Arm-level settings (Z Offset) ===
+        arm_header = ttk.Frame(parent)
+        arm_header.pack(fill=tk.X, pady=(0, 5))
+
+        ttk.Label(arm_header, text="Z Offset:").pack(side=tk.LEFT, padx=(5, 2))
+        z_val = self.manager.config.get(arm_key, {}).get("z_offset", 0)
+        z_offset_var = tk.StringVar(value=str(z_val))
+        self.z_offset_vars[arm_key] = z_offset_var
+        z_entry = ttk.Entry(arm_header, textvariable=z_offset_var, width=6)
+        z_entry.pack(side=tk.LEFT, padx=2)
+        z_entry.bind("<FocusOut>", lambda e, a=arm_key: self._on_z_offset_change(a))
+        z_entry.bind("<Return>", lambda e, a=arm_key: self._on_z_offset_change(a))
+        ttk.Label(arm_header, text="mm (table surface calibration)").pack(side=tk.LEFT)
+
         for i, slot in enumerate(slots):
             # Container for 2-row layout
             slot_container = ttk.Frame(parent)
@@ -377,6 +405,84 @@ class CalibratorGUI:
             ttk.Label(row2, textvariable=pulse_ref_label, width=4).pack(side=tk.LEFT)
             ttk.Label(row2, text="µs").pack(side=tk.LEFT)
 
+    def _create_position_presets_panel(self):
+        """Create Position Presets panel with Vertex and Share Point controls."""
+        frame = ttk.LabelFrame(self.root, text="Position Presets", padding=10)
+        frame.pack(fill=tk.X, padx=10, pady=5)
+
+        # Two-column layout
+        left_column = ttk.Frame(frame)
+        left_column.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 10))
+        
+        right_column = ttk.Frame(frame)
+        right_column.pack(side=tk.LEFT, fill=tk.BOTH)
+
+        # Left column: Shared Vertices (1-8)
+        ttk.Label(left_column, text="Shared Vertices (Exclusive)", font=("Arial", 9, "bold")).grid(row=0, column=0, columnspan=5, sticky="w", pady=(0, 5))
+        
+        for i, vertex_id in enumerate(range(1, 9)):
+            row_idx = i + 1
+            
+            # Vertex label
+            ttk.Label(left_column, text=f"V{vertex_id}", width=3).grid(row=row_idx, column=0, padx=2)
+            
+            # Record button
+            ttk.Button(left_column, text="Rec", width=4,
+                command=lambda v=vertex_id: self._on_record_vertex(v)
+            ).grid(row=row_idx, column=1, padx=1)
+            
+            # Go button
+            ttk.Button(left_column, text="Go", width=3,
+                command=lambda v=vertex_id: self._on_go_to_vertex(v)
+            ).grid(row=row_idx, column=2, padx=1)
+            
+            # Clear button
+            ttk.Button(left_column, text="Clr", width=3,
+                command=lambda v=vertex_id: self._on_clear_vertex(v)
+            ).grid(row=row_idx, column=3, padx=1)
+            
+            # Ownership indicator (L / R / --)
+            indicator_var = tk.StringVar(value="--")
+            owner = self.manager.get_vertex_owner(vertex_id)
+            if owner == "left_arm":
+                indicator_var.set("L")
+            elif owner == "right_arm":
+                indicator_var.set("R")
+            self.vertex_indicators[vertex_id] = indicator_var
+            ttk.Label(left_column, textvariable=indicator_var, width=3).grid(row=row_idx, column=4, padx=2)
+
+        # Right column: Share Points (Per Arm)
+        ttk.Label(right_column, text="Share Points (Per Arm)", font=("Arial", 9, "bold")).grid(row=0, column=0, columnspan=5, sticky="w", pady=(0, 5))
+        
+        for i, arm in enumerate(["left_arm", "right_arm"]):
+            row_idx = i + 1
+            arm_label = "L" if arm == "left_arm" else "R"
+            
+            # Share Point label
+            ttk.Label(right_column, text=f"Share ({arm_label})", width=10).grid(row=row_idx, column=0, padx=2)
+            
+            # Record button
+            ttk.Button(right_column, text="Rec", width=4,
+                command=lambda a=arm: self._on_record_share_point(a)
+            ).grid(row=row_idx, column=1, padx=1)
+            
+            # Go button
+            ttk.Button(right_column, text="Go", width=3,
+                command=lambda a=arm: self._on_go_to_share_point(a)
+            ).grid(row=row_idx, column=2, padx=1)
+            
+            # Clear button
+            ttk.Button(right_column, text="Clr", width=3,
+                command=lambda a=arm: self._on_clear_share_point(a)
+            ).grid(row=row_idx, column=3, padx=1)
+            
+            # Set indicator (✓ / --)
+            indicator_var = tk.StringVar(value="--")
+            if self.manager.get_share_point(arm):
+                indicator_var.set("✓")
+            self.share_point_indicators[arm] = indicator_var
+            ttk.Label(right_column, textvariable=indicator_var, width=3).grid(row=row_idx, column=4, padx=2)
+
     def _create_diagnostics_panel(self):
         """Create diagnostics panel."""
         frame = ttk.LabelFrame(self.root, text="Diagnostics", padding=10)
@@ -398,6 +504,7 @@ class CalibratorGUI:
         frame = ttk.Frame(self.root, padding=10)
         frame.pack(fill=tk.X)
 
+        # === Safety Group (Right side) ===
         # E-STOP button (prominent)
         estop_btn = tk.Button(
             frame, text="E-STOP", bg=THEME["error"], fg="white",
@@ -405,33 +512,34 @@ class CalibratorGUI:
             command=self._on_estop
         )
         estop_btn.pack(side=tk.RIGHT, padx=5)
-
-        # Save/Load config
-        ttk.Button(frame, text="Save Config", command=self._on_save_config).pack(side=tk.LEFT, padx=5)
-        ttk.Button(frame, text="Load Config", command=self._on_load_config).pack(side=tk.LEFT, padx=5)
-        
-        # Home position controls
-        ttk.Separator(frame, orient=tk.VERTICAL).pack(side=tk.LEFT, padx=10, fill=tk.Y)
-        ttk.Button(frame, text="Set Home", command=self._on_set_home).pack(side=tk.LEFT, padx=5)
-        ttk.Button(frame, text="Go Home", command=self._on_go_home).pack(side=tk.LEFT, padx=5)
-        
-        # Zero Point Calibration controls
-        ttk.Separator(frame, orient=tk.VERTICAL).pack(side=tk.LEFT, padx=10, fill=tk.Y)
-        ttk.Button(frame, text="Set Zero", command=self._on_set_zero).pack(side=tk.LEFT, padx=5)
-        ttk.Button(frame, text="Go to Zero", command=self._on_go_to_zero).pack(side=tk.LEFT, padx=5)
-        
-        # Motion Duration spinbox
-        ttk.Separator(frame, orient=tk.VERTICAL).pack(side=tk.LEFT, padx=10, fill=tk.Y)
-        ttk.Label(frame, text="Speed:").pack(side=tk.LEFT)
-        self.duration_var = tk.DoubleVar(value=1.0)
-        duration_spinbox = ttk.Spinbox(frame, from_=0.5, to=3.0, increment=0.1, textvariable=self.duration_var, width=5, format="%.1f")
-        duration_spinbox.pack(side=tk.LEFT, padx=2)
-        ttk.Label(frame, text="s").pack(side=tk.LEFT)
         
         # Slider constraint toggle
-        ttk.Separator(frame, orient=tk.VERTICAL).pack(side=tk.LEFT, padx=10, fill=tk.Y)
         self.constrain_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(frame, text="Limit to Min/Max", variable=self.constrain_var, command=self._on_constrain_toggle).pack(side=tk.LEFT, padx=5)
+        ttk.Checkbutton(frame, text="Limit", variable=self.constrain_var, command=self._on_constrain_toggle).pack(side=tk.RIGHT, padx=5)
+        
+        ttk.Separator(frame, orient=tk.VERTICAL).pack(side=tk.RIGHT, padx=5, fill=tk.Y)
+
+        # === Config Group ===
+        ttk.Button(frame, text="Save", command=self._on_save_config).pack(side=tk.LEFT, padx=2)
+        ttk.Button(frame, text="Load", command=self._on_load_config).pack(side=tk.LEFT, padx=2)
+        
+        ttk.Separator(frame, orient=tk.VERTICAL).pack(side=tk.LEFT, padx=5, fill=tk.Y)
+        
+        # === Home/Zero Group (Set) ===
+        ttk.Button(frame, text="Set Home", command=self._on_set_home).pack(side=tk.LEFT, padx=2)
+        ttk.Button(frame, text="Set Zero", command=self._on_set_zero).pack(side=tk.LEFT, padx=2)
+        
+        ttk.Separator(frame, orient=tk.VERTICAL).pack(side=tk.LEFT, padx=5, fill=tk.Y)
+        
+        # === Motion Group (Go + Speed) ===
+        ttk.Button(frame, text="Go Home", command=self._on_go_home).pack(side=tk.LEFT, padx=2)
+        ttk.Button(frame, text="Go Zero", command=self._on_go_to_zero).pack(side=tk.LEFT, padx=2)
+        
+        ttk.Label(frame, text="Speed:").pack(side=tk.LEFT, padx=(10, 2))
+        self.duration_var = tk.DoubleVar(value=1.0)
+        duration_spinbox = ttk.Spinbox(frame, from_=0.5, to=3.0, increment=0.1, textvariable=self.duration_var, width=4, format="%.1f")
+        duration_spinbox.pack(side=tk.LEFT, padx=2)
+        ttk.Label(frame, text="s").pack(side=tk.LEFT)
 
     def _refresh_ports(self):
         """Refresh available COM ports."""
@@ -685,6 +793,17 @@ class CalibratorGUI:
             # Invalid input, reset to saved value
             self.length_vars[(arm, slot)].set(str(self.manager.get_length(arm, slot)))
 
+    def _on_z_offset_change(self, arm):
+        """Handle Z offset entry change."""
+        val_str = self.z_offset_vars[arm].get()
+        try:
+            z_offset = float(val_str)
+            if arm in self.manager.config:
+                self.manager.config[arm]["z_offset"] = z_offset
+        except ValueError:
+            current = self.manager.config.get(arm, {}).get("z_offset", 0)
+            self.z_offset_vars[arm].set(str(current))
+
     def _on_range_change(self, arm, slot):
         """Handle actuation range dropdown change."""
         new_range = self.actuation_range_vars[(arm, slot)].get()
@@ -737,44 +856,87 @@ class CalibratorGUI:
         messagebox.showinfo("I2C Scan", "PCA9685 expected at address 0x40\n(Full scan not implemented via Serial)")
 
     def _on_save_config(self):
-        """Save current configuration."""
+        """Save current configuration with verification."""
+        # Run verification before saving
+        try:
+            from verify_engine import run_verification
+            result = run_verification(self.manager.config)
+            
+            if not result["is_valid"]:
+                msg = f"Total error: {result['total_error']:.1f}mm\n"
+                msg += f"Largest: {result['largest_error']}\n\n"
+                msg += "Save anyway?"
+                
+                if not messagebox.askyesno("Verification Warning", msg):
+                    return
+        except Exception as e:
+            # If verification fails, ask user
+            if not messagebox.askyesno("Warning", f"Verification failed: {e}\n\nSave anyway?"):
+                return
+        
         if self.manager.save_config():
             messagebox.showinfo("Success", "Configuration saved")
         else:
             messagebox.showerror("Error", "Failed to save configuration")
 
     def _on_load_config(self):
-        """Reload configuration from file."""
+        """Reload configuration from file and refresh all UI variables."""
         self.manager.load_config()
 
-        # Update UI with loaded values
         for arm in ARM_NAMES:
-            for slot in range(1, NUM_SLOTS + 1):
-                self.channel_vars[(arm, slot)].set(self.manager.get_channel(arm, slot))
-                limits = self.manager.get_limits(arm, slot)
-                self.min_labels[(arm, slot)].set(str(limits["min"]))
-                self.max_labels[(arm, slot)].set(str(limits["max"]))
-                
-                # Update kinematics fields
-                loaded_type = self.manager.get_type(arm, slot)
-                self.type_vars[(arm, slot)].set(loaded_type)
-                
-                # Update min_pos options and value
-                combo = self.min_pos_combos[(arm, slot)]
-                combo['values'] = self._get_min_pos_options(loaded_type)
-                self.min_pos_vars[(arm, slot)].set(self.manager.get_min_pos(arm, slot))
-                
-                self.length_vars[(arm, slot)].set(str(self.manager.get_length(arm, slot)))
-                
-                # Update Pulse slider (Master)
-                initial_pulse = self.manager.get_initial_pulse(arm, slot)
-                self.pulse_vars[(arm, slot)].set(initial_pulse)
-                
-                # Update Angle display
-                initial_angle = self.manager.get_initial(arm, slot)
-                self.angle_vars[(arm, slot)].set(f"{initial_angle:.1f}")
+            # Refresh z_offset
+            if arm in self.z_offset_vars:
+                z_val = self.manager.config.get(arm, {}).get("z_offset", 0)
+                self.z_offset_vars[arm].set(str(z_val))
 
-        messagebox.showinfo("Success", "Configuration loaded")
+            # Refresh per-slot UI
+            for slot in range(1, NUM_SLOTS + 1):
+                slot_key = f"slot_{slot}"
+                motor_config = self.manager.config.get(arm, {}).get(slot_key, {})
+
+                # Channel
+                if (arm, slot) in self.channel_vars:
+                    self.channel_vars[(arm, slot)].set(self.manager.get_channel(arm, slot))
+
+                # Pulse (slider)
+                if (arm, slot) in self.pulse_vars:
+                    initial_pulse = self.manager.get_initial_pulse(arm, slot)
+                    if initial_pulse < 0:
+                        initial_pulse = 1500
+                    self.pulse_vars[(arm, slot)].set(initial_pulse)
+
+                # Angle display
+                if (arm, slot) in self.angle_vars:
+                    angle = self.pulse_mapper.pulse_to_angle(
+                        self.pulse_vars[(arm, slot)].get(), motor_config
+                    )
+                    self.angle_vars[(arm, slot)].set(f"{angle:.1f}")
+
+                # Min/Max limits
+                limits = self.manager.get_limits(arm, slot)
+                if (arm, slot) in self.min_labels:
+                    self.min_labels[(arm, slot)].set(str(limits["min"]))
+                if (arm, slot) in self.max_labels:
+                    self.max_labels[(arm, slot)].set(str(limits["max"]))
+
+                # Type, min_pos, length, range
+                if (arm, slot) in self.type_vars:
+                    self.type_vars[(arm, slot)].set(self.manager.get_type(arm, slot))
+                if (arm, slot) in self.min_pos_vars:
+                    self.min_pos_vars[(arm, slot)].set(self.manager.get_min_pos(arm, slot))
+                if (arm, slot) in self.length_vars:
+                    self.length_vars[(arm, slot)].set(str(self.manager.get_length(arm, slot)))
+                if (arm, slot) in self.actuation_range_vars:
+                    self.actuation_range_vars[(arm, slot)].set(self.manager.get_actuation_range(arm, slot))
+
+                # Pulse reference
+                if (arm, slot) in self.pulse_ref_labels:
+                    self.pulse_ref_labels[(arm, slot)].set(str(self.manager.get_pulse_min(arm, slot)))
+
+        messagebox.showinfo("Success", "Configuration reloaded")
+
+
+
 
     def _on_set_home(self):
         """Save current slider positions as home (initial) position for all joints."""
@@ -892,6 +1054,142 @@ class CalibratorGUI:
         # Execute smooth motion
         duration = self.duration_var.get()
         self.motion_planner.move_all(targets, duration)
+
+    # ========== Position Presets Event Handlers ==========
+
+    def _on_record_vertex(self, vertex_id):
+        """Record current arm's pulse values to a vertex."""
+        arm = self.current_arm_tab
+        
+        # Collect current UI pulse values and calculate angles
+        pulses = {}
+        angles = {}
+        for slot in range(1, NUM_SLOTS + 1):
+            pulse = self.pulse_vars[(arm, slot)].get()
+            pulses[f"slot_{slot}"] = pulse
+            
+            # Convert pulse to angle using motor config
+            slot_key = f"slot_{slot}"
+            motor_config = self.manager.config.get(arm, {}).get(slot_key, {})
+            angle = self.pulse_mapper.pulse_to_angle(pulse, motor_config)
+            angles[f"slot_{slot}"] = round(angle, 1)
+        
+        # Save to manager (with exclusive ownership)
+        self.manager._ensure_vertices_exists()
+        self.manager.config["vertices"][str(vertex_id)] = {
+            "owner": arm,
+            "pulses": pulses,
+            "angles": angles
+        }
+        
+        # Update indicator
+        if vertex_id in self.vertex_indicators:
+            self.vertex_indicators[vertex_id].set("L" if arm == "left_arm" else "R")
+
+    def _on_go_to_vertex(self, vertex_id):
+        """Move to saved vertex position."""
+        if not self.is_connected:
+            messagebox.showwarning("Warning", "Not connected to hardware")
+            return
+        
+        vertex = self.manager.get_vertex(vertex_id)
+        if not vertex:
+            messagebox.showwarning("Warning", f"Vertex {vertex_id} is empty")
+            return
+        
+        owner = vertex.get("owner")
+        pulses = vertex.get("pulses", {})
+        
+        # Build target list
+        targets = []
+        for slot in range(1, NUM_SLOTS + 1):
+            slot_key = f"slot_{slot}"
+            if slot_key in pulses:
+                channel = self.manager.get_channel(owner, slot)
+                pulse = pulses[slot_key]
+                targets.append((channel, pulse))
+                
+                # Update UI
+                if (owner, slot) in self.pulse_vars:
+                    self.pulse_vars[(owner, slot)].set(pulse)
+        
+        # Execute motion
+        self.servo_state.clear_history()
+        duration = self.duration_var.get()
+        self.motion_planner.move_all(targets, duration)
+
+    def _on_clear_vertex(self, vertex_id):
+        """Clear a vertex."""
+        self.manager.clear_vertex(vertex_id)
+        
+        # Update indicator
+        if vertex_id in self.vertex_indicators:
+            self.vertex_indicators[vertex_id].set("--")
+
+    def _on_record_share_point(self, arm):
+        """Record current arm's pulse values as its share point."""
+        # Collect current UI pulse values and calculate angles
+        pulses = {}
+        angles = {}
+        for slot in range(1, NUM_SLOTS + 1):
+            pulse = self.pulse_vars[(arm, slot)].get()
+            pulses[f"slot_{slot}"] = pulse
+            
+            # Convert pulse to angle using motor config
+            slot_key = f"slot_{slot}"
+            motor_config = self.manager.config.get(arm, {}).get(slot_key, {})
+            angle = self.pulse_mapper.pulse_to_angle(pulse, motor_config)
+            angles[f"slot_{slot}"] = round(angle, 1)
+        
+        # Save to manager
+        self.manager._ensure_share_points_exists()
+        self.manager.config["share_points"][arm] = {
+            "pulses": pulses,
+            "angles": angles
+        }
+        
+        # Update indicator
+        if arm in self.share_point_indicators:
+            self.share_point_indicators[arm].set("✓")
+
+    def _on_go_to_share_point(self, arm):
+        """Move to saved share point position for the specified arm."""
+        if not self.is_connected:
+            messagebox.showwarning("Warning", "Not connected to hardware")
+            return
+        
+        share_point = self.manager.get_share_point(arm)
+        if not share_point:
+            messagebox.showwarning("Warning", f"Share Point ({arm}) is empty")
+            return
+        
+        pulses = share_point.get("pulses", {})
+        
+        # Build target list
+        targets = []
+        for slot in range(1, NUM_SLOTS + 1):
+            slot_key = f"slot_{slot}"
+            if slot_key in pulses:
+                channel = self.manager.get_channel(arm, slot)
+                pulse = pulses[slot_key]
+                targets.append((channel, pulse))
+                
+                # Update UI
+                if (arm, slot) in self.pulse_vars:
+                    self.pulse_vars[(arm, slot)].set(pulse)
+        
+        # Execute motion
+        self.servo_state.clear_history()
+        duration = self.duration_var.get()
+        self.motion_planner.move_all(targets, duration)
+
+    def _on_clear_share_point(self, arm):
+        """Clear a share point."""
+        self.manager.clear_share_point(arm)
+        
+        # Update indicator
+        if arm in self.share_point_indicators:
+            self.share_point_indicators[arm].set("--")
 
     def _on_estop(self):
         """Emergency stop - release all servos."""

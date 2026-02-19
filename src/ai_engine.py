@@ -6,6 +6,7 @@ import numpy as np
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
+from lib.config_loader import load_prompt, load_tools
 
 load_dotenv()
 
@@ -112,11 +113,8 @@ class GeminiBrain:
             return {"error": "AI not initialized (Missing API Key). Please set GEMINI_API_KEY."}
 
         try:
-            # 1. Convert BGR to RGB (Gemini expects RGB)
-            frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
-            
-            # 2. Encode to JPEG bytes
-            success, buffer = cv2.imencode(".jpg", frame_rgb)
+            # 1. Encode to JPEG bytes (cv2.imencode expects BGR — no conversion needed)
+            success, buffer = cv2.imencode(".jpg", frame_bgr)
             if not success:
                 return {"error": "Failed to encode image"}
             
@@ -160,9 +158,8 @@ class GeminiBrain:
             return {"error": str(e)}
 
     def _encode_frame(self, frame_bgr):
-        """Convert BGR frame to JPEG bytes for Gemini API"""
-        frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
-        success, buffer = cv2.imencode(".jpg", frame_rgb)
+        # cv2.imencode expects BGR — no conversion needed
+        success, buffer = cv2.imencode(".jpg", frame_bgr)
         if not success:
             return None
         return buffer.tobytes()
@@ -394,7 +391,197 @@ Rules:
             print(f"Refine Error for {label}: {e}")
             return None
 
+    def execute_with_tools(self, frame_bgr, instruction):
+        """
+        Generate a robot execution plan using Gemini Function Calling.
+        
+        Returns a list of tool calls (steps) that the server should execute sequentially.
+        Does NOT execute robot commands — the caller handles actual execution.
+        
+        Returns:
+            {
+                "steps": [
+                    {"tool": "move_arm", "args": {"x": 200, "y": 100, "z": 5, "arm": "auto"}, "description": "..."},
+                    {"tool": "close_gripper", "args": {"arm": "right"}, "description": "..."},
+                    ...
+                ],
+                "summary": "Pick up the red pen"
+            }
+        """
+        if not self.client:
+            return {"error": "AI not initialized (Missing API Key)", "steps": []}
+
+        try:
+            image_bytes = self._encode_frame(frame_bgr)
+            if image_bytes is None:
+                return {"error": "Failed to encode frame", "steps": []}
+
+            # Load tool definitions from external YAML
+            tool_declarations = load_tools()
+            robot_tools = types.Tool(function_declarations=tool_declarations)
+
+            # Load prompt template from external Markdown
+            prompt_template = load_prompt("execute_planner")
+            if not prompt_template:
+                return {"error": "Failed to load execute_planner prompt", "steps": []}
+            prompt = prompt_template.format(instruction=instruction)
+
+            response = self.client.models.generate_content(
+                model=self.model_name,
+                contents=[
+                    prompt,
+                    types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg")
+                ],
+                config=types.GenerateContentConfig(
+                    tools=[robot_tools],
+                    temperature=0.2
+                )
+            )
+
+            # Extract function calls from response
+            steps = []
+            for candidate in response.candidates:
+                for part in candidate.content.parts:
+                    if part.function_call:
+                        fc = part.function_call
+                        steps.append({
+                            "tool": fc.name,
+                            "args": dict(fc.args) if fc.args else {},
+                            "description": f"{fc.name}({', '.join(f'{k}={v}' for k, v in (fc.args or {}).items())})"
+                        })
+                    elif part.text:
+                        # Model returned text alongside or instead of function calls
+                        pass
+
+            if not steps:
+                return {
+                    "error": "Model did not generate any tool calls",
+                    "steps": [],
+                    "raw_text": response.text if hasattr(response, 'text') else ""
+                }
+
+            # Post-process: convert Gemini image coords (0-1000) to robot mm
+            steps = self._convert_gemini_coords(steps)
+
+            return {
+                "steps": steps,
+                "summary": instruction,
+                "step_count": len(steps)
+            }
+
+        except Exception as e:
+            print(f"Execute with tools error: {e}")
+            return {"error": str(e), "steps": []}
+
+    def _convert_gemini_coords(self, steps):
+        """Convert Gemini image coords (0-1000) to robot mm using calibration homography.
+        
+        For each move_arm step, converts x,y from Gemini's 0-1000 normalized
+        image coordinates to robot mm via the calibration homography matrix.
+        Also determines the correct arm based on the converted x coordinate.
+        """
+        from calibration_manager import get_calibration_for_role
+        from lib.coordinate_transform import gemini_to_robot
+
+        cal = get_calibration_for_role("TopView")
+        if not cal:
+            print("Warning: No TopView calibration data — skipping coordinate conversion")
+            return steps
+
+        H = cal.get("homography_matrix")
+        res = cal.get("resolution", {})
+        width = res.get("width", 1920)
+        height = res.get("height", 1080)
+
+        if not H:
+            print("Warning: No homography matrix — skipping coordinate conversion")
+            return steps
+
+        for step in steps:
+            if step["tool"] != "move_arm":
+                continue
+
+            args = step["args"]
+            gx = float(args.get("x", 500))
+            gy = float(args.get("y", 500))
+
+            from lib.coordinate_transform import gemini_to_pixel
+            pixel = gemini_to_pixel(gx, gy, width, height)
+            robot = gemini_to_robot(gx, gy, H, width, height)
+            robot_x = round(robot["x"], 1)
+            robot_y = round(robot["y"], 1)
+
+            # Debug: full pipeline trace
+            gemini_arm = args.get("arm", "not_set")
+            print(f"  [COORD] Gemini raw: gx={gx:.0f}, gy={gy:.0f}, arm_hint={gemini_arm}")
+            print(f"  [COORD] Pixel: px={pixel['x']:.1f}, py={pixel['y']:.1f} (of {width}x{height})")
+            print(f"  [COORD] Robot: rx={robot_x}, ry={robot_y}")
+
+            # Auto arm selection based on converted robot x
+            if args.get("arm") == "auto" or "arm" not in args:
+                args["arm"] = "left" if robot_x < 0 else "right"
+
+            print(f"  [COORD] Arm decision: {args['arm']} (robot_x {'< 0' if robot_x < 0 else '>= 0'})")
+
+            args["x"] = robot_x
+            args["y"] = robot_y
+
+            # Update description with converted coords
+            step["description"] = f"move_arm({', '.join(f'{k}={v}' for k, v in args.items())})"
+
+        return steps
+
+    def verify_action(self, frame_bgr, step_type, context=""):
+        """
+        Verify robot action using arm camera frame.
+
+        Args:
+            frame_bgr: BGR frame from arm-mounted camera
+            step_type: "move_arm" (position check) or "gripper" (grasp check)
+            context: description of what should be verified
+
+        Returns:
+            dict with verified, description, offset (for position), correction_steps (for gripper)
+        """
+        if not self.client:
+            return {"verified": False, "error": "AI not initialized", "description": "No API key"}
+
+        try:
+            image_bytes = self._encode_frame(frame_bgr)
+            if image_bytes is None:
+                return {"verified": False, "description": "Failed to encode frame"}
+
+            # Load verification prompt from external Markdown
+            if step_type == "move_arm":
+                prompt_template = load_prompt("verify_position")
+            else:
+                prompt_template = load_prompt("verify_gripper")
+
+            if not prompt_template:
+                return {"verified": False, "description": "Failed to load verification prompt"}
+            prompt = prompt_template.format(context=context)
+
+            response = self.client.models.generate_content(
+                model=self.model_name,
+                contents=[
+                    prompt,
+                    types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg")
+                ],
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json"
+                )
+            )
+
+            result = json.loads(response.text)
+            print(f"[Verify] type={step_type} verified={result.get('verified')} desc={result.get('description', '')}")
+            return result
+
+        except Exception as e:
+            print(f"Verification Error: {e}")
+            return {"verified": False, "description": str(e)}
+
 if __name__ == "__main__":
     # Simple test
     brain = GeminiBrain()
     print("Brain initialized. Key present:", bool(brain.api_key))
+

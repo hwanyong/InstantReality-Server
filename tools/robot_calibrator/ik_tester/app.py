@@ -33,6 +33,7 @@ from .tabs.dual_view import DualViewTab
 from .tabs.triple_view import TripleViewTab
 from .tabs.full_slot_view import FullSlotTab
 from .tabs.full_slot2_view import FullSlot2Tab
+from .tabs.full_slot3_view import FullSlot3Tab
 
 # Thread Timing
 SENDER_LOOP_INTERVAL = 0.033
@@ -119,6 +120,11 @@ class IKTesterApp:
         t5_frame = ttk.Frame(self.notebook)
         self.notebook.add(t5_frame, text="Full Slot")
         self.tabs.append(FullSlot2Tab(t5_frame, self))
+        
+        # Tab 6: Full Slot 3 (Independent Copy)
+        t6_frame = ttk.Frame(self.notebook)
+        self.notebook.add(t6_frame, text="Full Slot 3")
+        self.tabs.append(FullSlot3Tab(t6_frame, self))
 
     def _create_styles(self):
         style = ttk.Style()
@@ -185,8 +191,12 @@ class IKTesterApp:
         while self.sender_running:
             if self.is_connected:
                 updates = self.servo_state.get_pending_updates()
+                if updates:
+                    print(f"[SENDER] Pending updates: {updates}")
                 for channel, pulse_us in updates:
-                    if self.driver.write_pulse(channel, pulse_us):
+                    result = self.driver.write_pulse(channel, pulse_us)
+                    print(f"[SENDER] Ch{channel}={pulse_us} -> {result}")
+                    if result:
                         self.servo_state.mark_as_sent(channel, pulse_us)
                     time.sleep(SENDER_CMD_DELAY)
             time.sleep(SENDER_LOOP_INTERVAL)
@@ -224,9 +234,21 @@ class IKTesterApp:
                 self.status_var.set(f"Connected: {port}")
                 self.status_canvas.itemconfig(self.status_indicator, fill="#44ff44")
                 self.connect_btn.config(text="Disconnect")
+                self._init_servo_state()  # Initialize servo_state with config values
                 self.log(f"Connected to {port}")
             else:
                 messagebox.showerror("Error", f"Failed to connect to {port}")
+
+    def _init_servo_state(self):
+        """Load initial_pulse from config to servo_state for all channels."""
+        for arm in ['right_arm', 'left_arm']:
+            for slot in range(1, 7):
+                channel = self.manager.get_channel(arm, slot)
+                initial_pulse = self.manager.get_initial_pulse(arm, slot)
+                if initial_pulse and initial_pulse > 0:
+                    self.servo_state.update_angle(channel, initial_pulse)
+                    self.servo_state.mark_as_sent(channel, initial_pulse)
+        self.log("[Init] servo_state initialized with initial_pulse values")
 
     def _on_estop(self):
         self.motion_planner.stop()

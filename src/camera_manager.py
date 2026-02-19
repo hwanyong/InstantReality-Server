@@ -30,6 +30,7 @@ class CameraThread:
         self.cap = cv2.VideoCapture(self.camera_index, cv2.CAP_DSHOW)
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
+        self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # Minimize buffer for low latency
         
         # Default Focus Strategy: Auto Focus ON initially
         # self.cap.set(cv2.CAP_PROP_AUTOFOCUS, 1)
@@ -172,8 +173,13 @@ class CameraThread:
 
 # Global Manager Pattern
 _cameras = {}
+_on_refresh_callbacks = []
 
-def init_cameras(indices, width=1280, height=720):
+def on_camera_refresh(callback):
+    """Register a callback to be invoked after refresh_cameras() completes."""
+    _on_refresh_callbacks.append(callback)
+
+def init_cameras(indices, width=1920, height=1080):
     """Initialize multiple cameras at startup. Called once when server starts."""
     print(f"Initializing cameras: {indices}")
     for idx in indices:
@@ -279,6 +285,13 @@ def refresh_cameras(width=1920, height=1080):
             "name": device["name"],
             "connected": idx in _cameras
         })
+    
+    # Notify subscribers (e.g. server.py invalidates source_tracks)
+    for cb in _on_refresh_callbacks:
+        try:
+            cb()
+        except Exception as e:
+            print(f"Refresh callback error: {e}")
     
     return result
 

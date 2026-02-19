@@ -1,283 +1,531 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// Gemini Robotics Control - Main Controller
 // src/static/robotics/app.mjs
-// Gemini Robotics Web App - Main Application
-// Vanilla JS + Native WebAPIs only
+//
+// Architecture: <video> + SVG overlay (from verified calibration.mjs pattern)
+// ─────────────────────────────────────────────────────────────────────────────
+
+import { showToast, showSuccess, showError } from './lib/toast.mjs'
+import { WebRTCHelper } from './lib/webrtc-helper.mjs'
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Constants
+// ─────────────────────────────────────────────────────────────────────────────
 
 const API_BASE = ''
+const SVG_NS = 'http://www.w3.org/2000/svg'
 
-// =============================================================================
-// State
-// =============================================================================
-let robotConfig = null
-let currentArm = null
-let lastIKResult = null
+// Original camera resolution (server capture size) — Master Scale Alignment
+const ORIGINAL_WIDTH = 1920
+const ORIGINAL_HEIGHT = 1080
 
-// =============================================================================
-// DOM Elements
-// =============================================================================
+// ─────────────────────────────────────────────────────────────────────────────
+// Globals
+// ─────────────────────────────────────────────────────────────────────────────
+
+let webrtc = null
+let ROLES = []
+
+// UI Elements
 const elements = {
+    video: document.getElementById('camera-0'),
+    overlaySvg: document.getElementById('overlay-svg'),
+    resultGroup: document.getElementById('result-group'),
     connectionStatus: document.getElementById('connection-status'),
     estopBtn: document.getElementById('estop-btn'),
-    videoCanvas: document.getElementById('video-canvas'),
-    arOverlay: document.getElementById('ar-overlay'),
-    captureBtn: document.getElementById('capture-btn'),
-    clearArBtn: document.getElementById('clear-ar-btn'),
     promptInput: document.getElementById('prompt-input'),
-    sendPromptBtn: document.getElementById('send-prompt-btn'),
+    sendBtn: document.getElementById('send-prompt-btn'),
+    scanBtn: document.getElementById('scan-btn'),
+    executeBtn: document.getElementById('execute-btn'),
     geminiResult: document.getElementById('gemini-result'),
-    armSelection: document.getElementById('arm-selection'),
-    jointSliders: document.getElementById('joint-sliders'),
-    sendManualBtn: document.getElementById('send-manual-btn'),
-    ikX: document.getElementById('ik-x'),
-    ikY: document.getElementById('ik-y'),
-    ikZ: document.getElementById('ik-z'),
-    testIkBtn: document.getElementById('test-ik-btn'),
-    ikResult: document.getElementById('ik-result')
+    taskSteps: document.getElementById('task-steps'),
+    abortPlanBtn: document.getElementById('abort-plan-btn'),
 }
 
-// =============================================================================
-// API Functions
-// =============================================================================
-async function api(endpoint, method = 'GET', data = null) {
-    const options = {
-        method,
-        headers: { 'Content-Type': 'application/json' }
-    }
-    if (data) options.body = JSON.stringify(data)
+// Current execution plan
+let currentPlan = null
 
-    const response = await fetch(`${API_BASE}${endpoint}`, options)
-    return response.json()
+// Step icons for rendering
+const STEP_ICONS = {
+    move_arm: '🦾', open_gripper: '✋', close_gripper: '✊', go_home: '🏠'
 }
 
-async function loadConfig() {
-    try {
-        robotConfig = await api('/api/config')
-        console.log('Config loaded:', robotConfig)
-        setConnected(true)
-        generateJointSliders()
-    } catch (err) {
-        console.error('Failed to load config:', err)
-        setConnected(false)
-    }
-}
+// ─────────────────────────────────────────────────────────────────────────────
+// Task Step Rendering
+// ─────────────────────────────────────────────────────────────────────────────
 
-async function captureFrame() {
-    elements.captureBtn.classList.add('loading')
-    try {
-        const result = await api('/api/capture')
-        if (result.image) {
-            displayImage(result.image)
-        }
-    } catch (err) {
-        console.error('Capture failed:', err)
-    }
-    elements.captureBtn.classList.remove('loading')
-}
-
-async function sendPrompt() {
-    const instruction = elements.promptInput.value.trim()
-    if (!instruction) return
-
-    elements.sendPromptBtn.classList.add('loading')
-    elements.geminiResult.textContent = 'Processing...'
-
-    try {
-        const result = await api('/api/prompt', 'POST', { instruction })
-
-        // Display result
-        elements.geminiResult.textContent = JSON.stringify(result, null, 2)
-
-        // Update arm selection
-        if (result.ik_result?.arm) {
-            currentArm = result.ik_result.arm
-            elements.armSelection.textContent = currentArm
-        }
-
-        // Draw AR overlay
-        if (result.gemini_analysis?.coordinates) {
-            drawTargetOverlay(result)
-        }
-
-        lastIKResult = result.ik_result
-
-    } catch (err) {
-        elements.geminiResult.textContent = 'Error: ' + err.message
-    }
-    elements.sendPromptBtn.classList.remove('loading')
-}
-
-async function testIK() {
-    const x = parseFloat(elements.ikX.value)
-    const y = parseFloat(elements.ikY.value)
-    const z = parseFloat(elements.ikZ.value)
-
-    try {
-        const result = await api('/api/ik/test', 'POST', { x, y, z, arm: currentArm || 'right_arm' })
-        elements.ikResult.textContent = JSON.stringify(result, null, 2)
-        lastIKResult = result
-    } catch (err) {
-        elements.ikResult.textContent = 'Error: ' + err.message
-    }
-}
-
-async function sendManual() {
-    if (!lastIKResult?.pulses) {
-        alert('No IK result to execute')
+function renderTaskSteps(steps) {
+    if (!elements.taskSteps) return
+    if (!steps || steps.length == 0) {
+        elements.taskSteps.innerHTML = '<li class="step-empty">대기 중…</li>'
         return
     }
-
-    try {
-        const result = await api('/api/execute', 'POST', {
-            pulses: lastIKResult.pulses,
-            duration: 500
-        })
-        console.log('Execute result:', result)
-    } catch (err) {
-        console.error('Execute failed:', err)
-    }
+    elements.taskSteps.innerHTML = steps.map((s, i) => {
+        const icon = STEP_ICONS[s.tool] || '⚙️'
+        const desc = s.description || s.tool
+        return `<li class="step-item" data-index="${i}" data-status="pending">${icon} ${desc}</li>`
+    }).join('')
 }
 
-async function emergencyStop() {
-    try {
-        await api('/api/estop', 'POST', {})
-        elements.connectionStatus.textContent = '● E-STOP'
-        elements.connectionStatus.style.color = 'var(--danger)'
-    } catch (err) {
-        console.error('E-STOP failed:', err)
-    }
+function updateStepStatus(index, status) {
+    if (!elements.taskSteps) return
+    const item = elements.taskSteps.querySelector(`[data-index="${index}"]`)
+    if (!item) return
+    item.dataset.status = status
+    const prefix = status == 'running' ? '🔄' : status == 'done' ? '✅' : status == 'error' ? '❌' : '⏳'
+    item.textContent = `${prefix} ${item.textContent.substring(2)}`
 }
 
-// =============================================================================
-// UI Functions
-// =============================================================================
-function setConnected(connected) {
-    if (connected) {
+// ─────────────────────────────────────────────────────────────────────────────
+// WebRTC Connection (from calibration.mjs:45-70)
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function initWebRTC() {
+    webrtc = new WebRTCHelper()
+
+    // Bind video tracks to camera elements by role
+    webrtc.on('track', (track, index, role) => {
+        const roleIndex = webrtc.roles.indexOf(role)
+        if (roleIndex == 0) {
+            // Only bind the first role (TopView) to the main video
+            if (elements.video) {
+                elements.video.srcObject = new MediaStream([track])
+                elements.video.play().catch(e => console.warn('Autoplay prevented:', e))
+            }
+        }
+    })
+
+    webrtc.on('connected', () => {
+        updateConnectionStatus('connected')
+        showSuccess('카메라 연결됨')
+    })
+
+    webrtc.on('disconnected', () => {
+        updateConnectionStatus('disconnected')
+        showError('카메라 연결 끊김')
+    })
+
+    await webrtc.connect()
+    ROLES = webrtc.roles
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Connection Status
+// ─────────────────────────────────────────────────────────────────────────────
+
+function updateConnectionStatus(state) {
+    if (!elements.connectionStatus) return
+
+    if (state == 'connected') {
         elements.connectionStatus.textContent = '● Connected'
-        elements.connectionStatus.classList.remove('disconnected')
-        elements.connectionStatus.classList.add('connected')
+        elements.connectionStatus.className = 'status connected'
     } else {
         elements.connectionStatus.textContent = '● Disconnected'
-        elements.connectionStatus.classList.remove('connected')
-        elements.connectionStatus.classList.add('disconnected')
+        elements.connectionStatus.className = 'status disconnected'
     }
 }
 
-function generateJointSliders() {
-    if (!robotConfig?.arms) return
+// ─────────────────────────────────────────────────────────────────────────────
+// SVG Overlay (from calibration.mjs:241-248)
+// ─────────────────────────────────────────────────────────────────────────────
 
-    const arm = robotConfig.arms.right_arm || robotConfig.arms.left_arm
-    if (!arm) return
-
-    elements.jointSliders.innerHTML = ''
-
-    const joints = ['θ1', 'θ2', 'θ3', 'θ4', 'θ5', 'θ6']
-    const defaults = [0, 45, -45, -90, 90, 0]
-
-    joints.forEach((name, i) => {
-        const row = document.createElement('div')
-        row.className = 'slider-row'
-        row.innerHTML = `
-            <label>${name}</label>
-            <input type="range" min="-180" max="180" value="${defaults[i]}" data-joint="${i}">
-            <span class="value">${defaults[i]}°</span>
-        `
-
-        const slider = row.querySelector('input')
-        const valueSpan = row.querySelector('.value')
-        slider.addEventListener('input', () => {
-            valueSpan.textContent = slider.value + '°'
-        })
-
-        elements.jointSliders.appendChild(row)
-    })
-}
-
-function displayImage(base64Image) {
-    const ctx = elements.videoCanvas.getContext('2d')
-    const img = new Image()
-    img.onload = () => {
-        ctx.drawImage(img, 0, 0, elements.videoCanvas.width, elements.videoCanvas.height)
-    }
-    img.src = 'data:image/jpeg;base64,' + base64Image
-}
-
-function drawTargetOverlay(result) {
-    const ctx = elements.arOverlay.getContext('2d')
-    const w = elements.arOverlay.width
-    const h = elements.arOverlay.height
-
-    // Clear previous
-    ctx.clearRect(0, 0, w, h)
-
-    const coords = result.gemini_analysis?.coordinates
-    if (!coords) return
-
-    // Gemini returns [y, x] normalized 0-1000
-    const targetX = (coords[1] / 1000) * w
-    const targetY = (coords[0] / 1000) * h
-
-    // Draw target point
-    ctx.fillStyle = '#ff4444'
-    ctx.beginPath()
-    ctx.arc(targetX, targetY, 10, 0, Math.PI * 2)
-    ctx.fill()
-
-    // Draw crosshair
-    ctx.strokeStyle = '#ff4444'
-    ctx.lineWidth = 2
-    ctx.beginPath()
-    ctx.moveTo(targetX - 20, targetY)
-    ctx.lineTo(targetX + 20, targetY)
-    ctx.moveTo(targetX, targetY - 20)
-    ctx.lineTo(targetX, targetY + 20)
-    ctx.stroke()
-
-    // Draw bounding box
-    ctx.strokeStyle = '#44ff44'
-    ctx.lineWidth = 2
-    ctx.strokeRect(targetX - 40, targetY - 40, 80, 80)
-
-    // Label
-    ctx.fillStyle = '#ffffff'
-    ctx.font = '14px sans-serif'
-    ctx.fillText(result.ik_result?.arm || '', targetX + 15, targetY - 25)
+function updateViewBox() {
+    if (!elements.overlaySvg) return
+    // Always use original camera resolution for coordinate consistency
+    elements.overlaySvg.setAttribute('viewBox', `0 0 ${ORIGINAL_WIDTH} ${ORIGINAL_HEIGHT}`)
 }
 
 function clearOverlay() {
-    const ctx = elements.arOverlay.getContext('2d')
-    ctx.clearRect(0, 0, elements.arOverlay.width, elements.arOverlay.height)
+    if (!elements.resultGroup) return
+    elements.resultGroup.innerHTML = ''
 }
 
-// =============================================================================
-// Event Listeners
-// =============================================================================
-elements.estopBtn.addEventListener('click', emergencyStop)
-elements.captureBtn.addEventListener('click', captureFrame)
-elements.clearArBtn.addEventListener('click', clearOverlay)
-elements.sendPromptBtn.addEventListener('click', sendPrompt)
-elements.testIkBtn.addEventListener('click', testIK)
-elements.sendManualBtn.addEventListener('click', sendManual)
+// Draw Gemini analysis result on SVG overlay
+// Expects result with: coordinates [y, x] (0-1000), box_2d [ymin, xmin, ymax, xmax] (0-1000)
+function drawGeminiResult(result) {
+    clearOverlay()
+    if (!result || !elements.resultGroup) return
 
-// Keyboard shortcut: Enter to send
-elements.promptInput.addEventListener('keydown', (e) => {
-    if (e.key == 'Enter' && e.ctrlKey) {
-        sendPrompt()
+    const scaleX = ORIGINAL_WIDTH / 1000
+    const scaleY = ORIGINAL_HEIGHT / 1000
+
+    // Draw bounding box if available
+    if (result.box_2d && result.box_2d.length == 4) {
+        const [ymin, xmin, ymax, xmax] = result.box_2d
+        const x = xmin * scaleX
+        const y = ymin * scaleY
+        const w = (xmax - xmin) * scaleX
+        const h = (ymax - ymin) * scaleY
+
+        const rect = document.createElementNS(SVG_NS, 'rect')
+        rect.setAttribute('class', 'bbox')
+        rect.setAttribute('x', x)
+        rect.setAttribute('y', y)
+        rect.setAttribute('width', w)
+        rect.setAttribute('height', h)
+        elements.resultGroup.appendChild(rect)
+
+        // Label
+        const label = document.createElementNS(SVG_NS, 'text')
+        label.setAttribute('class', 'bbox-label')
+        label.setAttribute('x', x + 6)
+        label.setAttribute('y', y - 8)
+        label.textContent = result.description || 'Target'
+        elements.resultGroup.appendChild(label)
     }
-})
 
-// =============================================================================
-// Initialize
-// =============================================================================
-window.addEventListener('load', () => {
-    loadConfig()
+    // Draw center point if available
+    if (result.coordinates && result.coordinates.length == 2) {
+        const [py, px] = result.coordinates
+        const cx = px * scaleX
+        const cy = py * scaleY
 
-    // Draw placeholder on canvas
-    const ctx = elements.videoCanvas.getContext('2d')
-    ctx.fillStyle = '#1a1a2e'
-    ctx.fillRect(0, 0, elements.videoCanvas.width, elements.videoCanvas.height)
-    ctx.fillStyle = '#58a6ff'
-    ctx.font = '20px sans-serif'
-    ctx.textAlign = 'center'
-    ctx.fillText('Click "Capture" to start', elements.videoCanvas.width / 2, elements.videoCanvas.height / 2)
-})
+        const circle = document.createElementNS(SVG_NS, 'circle')
+        circle.setAttribute('class', 'center-point')
+        circle.setAttribute('cx', cx)
+        circle.setAttribute('cy', cy)
+        circle.setAttribute('r', 10)
+        elements.resultGroup.appendChild(circle)
+    }
 
-console.log('Gemini Robotics App initialized')
+    // Draw multiple objects if available (scan result)
+    if (result.objects && Array.isArray(result.objects)) {
+        result.objects.forEach((obj, i) => {
+            if (!obj.box_2d || obj.box_2d.length != 4) return
+
+            const [ymin, xmin, ymax, xmax] = obj.box_2d
+            const x = xmin * scaleX
+            const y = ymin * scaleY
+            const w = (xmax - xmin) * scaleX
+            const h = (ymax - ymin) * scaleY
+
+            const rect = document.createElementNS(SVG_NS, 'rect')
+            rect.setAttribute('class', 'bbox')
+            rect.setAttribute('x', x)
+            rect.setAttribute('y', y)
+            rect.setAttribute('width', w)
+            rect.setAttribute('height', h)
+            if (obj.point) {
+                rect.setAttribute('stroke', '#10b981')
+            }
+            elements.resultGroup.appendChild(rect)
+
+            // Label
+            const label = document.createElementNS(SVG_NS, 'text')
+            label.setAttribute('class', 'bbox-label')
+            label.setAttribute('x', x + 6)
+            label.setAttribute('y', y - 8)
+            label.textContent = obj.label || `Object ${i + 1}`
+            elements.resultGroup.appendChild(label)
+
+            // Center point
+            if (obj.point && obj.point.length == 2) {
+                const [py, px] = obj.point
+                const cx = px * scaleX
+                const cy = py * scaleY
+
+                const circle = document.createElementNS(SVG_NS, 'circle')
+                circle.setAttribute('class', 'center-point')
+                circle.setAttribute('cx', cx)
+                circle.setAttribute('cy', cy)
+                circle.setAttribute('r', 8)
+                elements.resultGroup.appendChild(circle)
+            }
+        })
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Gemini API
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function sendPrompt() {
+    const instruction = elements.promptInput?.value?.trim()
+    if (!instruction) {
+        showError('명령을 입력해주세요')
+        return
+    }
+
+    elements.sendBtn.disabled = true
+    elements.sendBtn.textContent = '⏳ Analyzing...'
+    elements.geminiResult.textContent = 'Analyzing...'
+    clearOverlay()
+
+    try {
+        const res = await fetch(`${API_BASE}/api/gemini/analyze`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ instruction })
+        })
+        const data = await res.json()
+
+        if (data.error) {
+            elements.geminiResult.textContent = `Error: ${data.error}`
+            showError(data.error)
+            return
+        }
+
+        elements.geminiResult.textContent = JSON.stringify(data, null, 2)
+        drawGeminiResult(data)
+
+        if (data.target_detected) {
+            showSuccess('타겟 감지됨')
+        } else {
+            showToast('타겟을 찾지 못했습니다')
+        }
+    } catch (e) {
+        elements.geminiResult.textContent = `Error: ${e.message}`
+        showError(`분석 실패: ${e.message}`)
+    } finally {
+        elements.sendBtn.disabled = false
+        elements.sendBtn.textContent = '🚀 Analyze'
+    }
+}
+
+async function scanScene() {
+    elements.scanBtn.disabled = true
+    elements.scanBtn.textContent = '⏳ Scanning...'
+    elements.geminiResult.textContent = 'Scanning scene...'
+    clearOverlay()
+
+    try {
+        const res = await fetch(`${API_BASE}/api/scene/init`, {
+            method: 'POST'
+        })
+        const data = await res.json()
+
+        if (data.error) {
+            elements.geminiResult.textContent = `Error: ${data.error}`
+            showError(data.error)
+            return
+        }
+
+        elements.geminiResult.textContent = JSON.stringify(data, null, 2)
+        drawGeminiResult(data)
+        const count = data.objects?.length || 0
+        showSuccess(`${count}개 객체 감지됨`)
+    } catch (e) {
+        elements.geminiResult.textContent = `Error: ${e.message}`
+        showError(`스캔 실패: ${e.message}`)
+    } finally {
+        elements.scanBtn.disabled = false
+        elements.scanBtn.textContent = '🔍 Scan'
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// E-STOP
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function emergencyStop() {
+    try {
+        const res = await fetch(`${API_BASE}/api/robot/release`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({})
+        })
+        const data = await res.json()
+        if (data.success) {
+            showToast('🛑 E-STOP: 모든 서보 해제')
+        } else {
+            showError(`E-STOP 실패: ${data.error || 'Unknown error'}`)
+        }
+    } catch (e) {
+        showError(`E-STOP 실패: ${e.message}`)
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Event Listeners
+// ─────────────────────────────────────────────────────────────────────────────
+
+function initEventListeners() {
+    // E-STOP
+    if (elements.estopBtn) {
+        elements.estopBtn.addEventListener('click', emergencyStop)
+    }
+
+    // Send prompt (analyze)
+    if (elements.sendBtn) {
+        elements.sendBtn.addEventListener('click', sendPrompt)
+    }
+
+    // Scan scene
+    if (elements.scanBtn) {
+        elements.scanBtn.addEventListener('click', scanScene)
+    }
+
+    // Execute (generate plan + start execution on server)
+    if (elements.executeBtn) {
+        elements.executeBtn.addEventListener('click', executeCommand)
+    }
+
+    // Abort plan (via WebSocket)
+    if (elements.abortPlanBtn) {
+        elements.abortPlanBtn.addEventListener('click', abortPlan)
+    }
+
+    // Enter key in prompt
+    if (elements.promptInput) {
+        elements.promptInput.addEventListener('keydown', (e) => {
+            if (e.key == 'Enter' && !e.shiftKey) {
+                e.preventDefault()
+                sendPrompt()
+            }
+        })
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Execute Command — Server-Driven Orchestration
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function executeCommand() {
+    const instruction = elements.promptInput?.value?.trim()
+    if (!instruction) {
+        showError('명령을 입력해주세요')
+        return
+    }
+
+    elements.executeBtn.disabled = true
+    elements.executeBtn.textContent = '⏳ Planning...'
+    elements.geminiResult.textContent = 'Generating and executing plan...'
+    renderTaskSteps([])
+
+    try {
+        const res = await fetch(`${API_BASE}/api/plan/start`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ instruction })
+        })
+        const data = await res.json()
+
+        if (data.error) {
+            elements.geminiResult.textContent = `Error: ${data.error}`
+            showError(data.error)
+            elements.executeBtn.disabled = false
+            elements.executeBtn.textContent = '⚡ Execute'
+            return
+        }
+
+        // Plan is now executing on server. UI updates come via WebSocket.
+        if (elements.abortPlanBtn) elements.abortPlanBtn.disabled = false
+        showSuccess(`Plan ${data.plan_id} 시작됨 (${data.step_count || 0}단계)`)
+    } catch (e) {
+        elements.geminiResult.textContent = `Error: ${e.message}`
+        showError(`실행 계획 생성 실패: ${e.message}`)
+        elements.executeBtn.disabled = false
+        elements.executeBtn.textContent = '⚡ Execute'
+    }
+}
+
+async function abortPlan() {
+    showToast('⏹ 중단 요청...')
+    // Send abort via WebSocket
+    if (window._planWs && window._planWs.readyState == WebSocket.OPEN) {
+        window._planWs.send(JSON.stringify({ type: 'plan:abort' }))
+    }
+    // Also E-STOP as fallback
+    try {
+        await fetch(`${API_BASE}/api/robot/release`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({})
+        })
+    } catch (_) { }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WebSocket: Server-Driven Plan Progress
+// ─────────────────────────────────────────────────────────────────────────────
+
+function initPlanWebSocket() {
+    const protocol = location.protocol == 'https:' ? 'wss:' : 'ws:'
+    const ws = new WebSocket(`${protocol}//${location.host}/ws`)
+    window._planWs = ws
+
+    ws.onmessage = (event) => {
+        let data
+        try { data = JSON.parse(event.data) } catch { return }
+
+        const type = data.type
+
+        if (type == 'plan:ready') {
+            currentPlan = data
+            renderTaskSteps(data.steps || [])
+            elements.geminiResult.textContent = JSON.stringify(data, null, 2)
+            showSuccess(`${data.step_count || 0}단계 실행 계획 생성됨`)
+        }
+
+        if (type == 'step:start') {
+            updateStepStatus(data.index, 'running')
+            showToast(`🔄 Step ${data.index + 1}: ${data.description || data.tool}`)
+        }
+
+        if (type == 'step:done') {
+            updateStepStatus(data.index, 'done')
+        }
+
+        if (type == 'step:failed') {
+            updateStepStatus(data.index, 'error')
+            showError(`Step ${data.index + 1} 실패: ${data.error || 'Unknown'}`)
+        }
+
+        if (type == 'step:corrected') {
+            showToast(`🔧 Step ${data.index + 1} 보정 (${data.attempt}차)`)
+        }
+
+        if (type == 'plan:complete') {
+            showSuccess(`실행 완료 (${data.total_time_sec}s)`)
+            _resetExecuteUI()
+        }
+
+        if (type == 'plan:failed' || type == 'plan:error') {
+            showError(`실행 실패: ${data.error || 'Unknown'}`)
+            _resetExecuteUI()
+        }
+
+        if (type == 'plan:aborted') {
+            showToast('⏹ Plan 중단됨')
+            _resetExecuteUI()
+        }
+    }
+
+    ws.onclose = () => {
+        // Auto-reconnect after 3 seconds
+        setTimeout(initPlanWebSocket, 3000)
+    }
+}
+
+function _resetExecuteUI() {
+    if (elements.executeBtn) {
+        elements.executeBtn.disabled = false
+        elements.executeBtn.textContent = '⚡ Execute'
+    }
+    if (elements.abortPlanBtn) elements.abortPlanBtn.disabled = true
+}
+
+function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Initialize (from calibration.mjs:1364-1389)
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function init() {
+    console.log('[app.mjs] Gemini Robotics Control initializing...')
+    initEventListeners()
+    updateViewBox()
+    initPlanWebSocket()
+
+    try {
+        await initWebRTC()
+        console.log('[app.mjs] WebRTC connected, roles:', ROLES)
+    } catch (e) {
+        console.error('[app.mjs] Failed to initialize WebRTC:', e)
+        showError(`WebRTC 초기화 실패: ${e.message}`)
+    }
+}
+
+init()

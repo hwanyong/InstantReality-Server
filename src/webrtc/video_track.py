@@ -2,7 +2,7 @@ from aiortc import VideoStreamTrack
 from av import VideoFrame
 import time
 import numpy as np
-from camera_manager import get_camera
+from src.camera_manager import get_camera
 
 class OpenCVVideoCapture(VideoStreamTrack):
     """
@@ -25,8 +25,9 @@ class OpenCVVideoCapture(VideoStreamTrack):
             # Send black frame when paused (saves bandwidth)
             frame_rgb = self._create_black_frame(16, 16)
         else:
-            # Normal: fetch from camera manager
-            high_res, frame_rgb = self.cam_thread.get_frames()
+            # Always fetch current camera instance (survives refresh_cameras)
+            cam = get_camera(self.camera_index)
+            high_res, frame_rgb = cam.get_frames()
             if frame_rgb is None:
                 frame_rgb = self._create_black_frame(16, 16)
         
@@ -38,7 +39,8 @@ class OpenCVVideoCapture(VideoStreamTrack):
 
     def get_latest_frame(self):
         """Returns the latest high-resolution frame (BGR) or None."""
-        high_res, _ = self.cam_thread.get_frames()
+        cam = get_camera(self.camera_index)
+        high_res, _ = cam.get_frames()
         return high_res
 
     def _create_black_frame(self, width, height):
@@ -49,3 +51,19 @@ class OpenCVVideoCapture(VideoStreamTrack):
         # But per current architecture, we can leave it running.
         super().stop()
 
+
+class BlackVideoTrack(VideoStreamTrack):
+    """
+    A minimal VideoStreamTrack that yields tiny black frames.
+    Used for per-client pause to save bandwidth.
+    """
+    def __init__(self):
+        super().__init__()
+        self._black_frame = np.zeros((16, 16, 3), dtype=np.uint8)
+    
+    async def recv(self):
+        pts, time_base = await self.next_timestamp()
+        video_frame = VideoFrame.from_ndarray(self._black_frame, format="rgb24")
+        video_frame.pts = pts
+        video_frame.time_base = time_base
+        return video_frame

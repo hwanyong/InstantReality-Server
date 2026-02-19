@@ -6,6 +6,7 @@ Manages servo configuration, pin mapping, and limit settings.
 import json
 import os
 from pulse_mapper import PulseMapper
+from geometry_engine import compute_geometry as _compute_geometry
 
 
 class ServoManager:
@@ -32,6 +33,14 @@ class ServoManager:
         },
         "connection": {
             "port": ""
+        },
+        "vertices": {
+            "1": None, "2": None, "3": None, "4": None,
+            "5": None, "6": None, "7": None, "8": None
+        },
+        "share_points": {
+            "left_arm": None,
+            "right_arm": None
         }
     }
 
@@ -88,7 +97,14 @@ class ServoManager:
             self._sync_angles_from_pulses() 
         except Exception as e:
             print(f"Warning: Failed to sync angles from pulses: {e}")
-            # Try to save anyway to persist pulse values
+
+        # 3. Compute Geometry (bases, vertices positions)
+        try:
+            self.compute_geometry()
+        except Exception as e:
+            print(f"Warning: Failed to compute geometry: {e}")
+
+        # 4. Save to file
         try:
             with open(self.config_path, 'w', encoding='utf-8') as f:
                 json.dump(self.config, f, indent=2)
@@ -522,6 +538,144 @@ class ServoManager:
             "left_arm": self.config.get("left_arm", {}),
             "right_arm": self.config.get("right_arm", {})
         }
+
+    # ========== Vertex Management (Exclusive Ownership) ==========
+
+    def _ensure_vertices_exists(self):
+        """Ensure vertices key exists in config."""
+        if "vertices" not in self.config:
+            self.config["vertices"] = {
+                "1": None, "2": None, "3": None, "4": None,
+                "5": None, "6": None, "7": None, "8": None
+            }
+
+    def set_vertex(self, vertex_id, arm):
+        """
+        Save current arm's pulse values to a vertex.
+        Exclusive ownership: if another arm owned this vertex, it's overwritten.
+
+        Args:
+            vertex_id: 1-8
+            arm: 'left_arm' or 'right_arm'
+        """
+        self._ensure_vertices_exists()
+        vertex_key = str(vertex_id)
+
+        # Collect current pulse values from the arm
+        pulses = {}
+        for slot in range(1, 7):
+            pulse = self.get_initial_pulse(arm, slot)
+            pulses[f"slot_{slot}"] = pulse
+
+        self.config["vertices"][vertex_key] = {
+            "owner": arm,
+            "pulses": pulses
+        }
+
+    def get_vertex(self, vertex_id):
+        """
+        Get vertex data.
+
+        Args:
+            vertex_id: 1-8
+
+        Returns:
+            dict: {"owner": arm, "pulses": {...}} or None if not set
+        """
+        self._ensure_vertices_exists()
+        vertex_key = str(vertex_id)
+        return self.config["vertices"].get(vertex_key)
+
+    def get_vertex_owner(self, vertex_id):
+        """
+        Quick check for vertex ownership.
+
+        Args:
+            vertex_id: 1-8
+
+        Returns:
+            str: 'left_arm', 'right_arm', or None
+        """
+        vertex = self.get_vertex(vertex_id)
+        if vertex:
+            return vertex.get("owner")
+        return None
+
+    def clear_vertex(self, vertex_id):
+        """
+        Clear a vertex.
+
+        Args:
+            vertex_id: 1-8
+        """
+        self._ensure_vertices_exists()
+        vertex_key = str(vertex_id)
+        self.config["vertices"][vertex_key] = None
+
+    # ========== Share Point Management (Per Arm) ==========
+
+    def _ensure_share_points_exists(self):
+        """Ensure share_points key exists in config."""
+        if "share_points" not in self.config:
+            self.config["share_points"] = {
+                "left_arm": None,
+                "right_arm": None
+            }
+
+    def set_share_point(self, arm):
+        """
+        Save current arm's pulse values as its share point.
+
+        Args:
+            arm: 'left_arm' or 'right_arm'
+        """
+        self._ensure_share_points_exists()
+
+        # Collect current pulse values from the arm
+        pulses = {}
+        for slot in range(1, 7):
+            pulse = self.get_initial_pulse(arm, slot)
+            pulses[f"slot_{slot}"] = pulse
+
+        self.config["share_points"][arm] = {"pulses": pulses}
+
+    def get_share_point(self, arm):
+        """
+        Get share point data for an arm.
+
+        Args:
+            arm: 'left_arm' or 'right_arm'
+
+        Returns:
+            dict: {"pulses": {...}} or None if not set
+        """
+        self._ensure_share_points_exists()
+        return self.config["share_points"].get(arm)
+
+    def clear_share_point(self, arm):
+        """
+        Clear a share point.
+
+        Args:
+            arm: 'left_arm' or 'right_arm'
+        """
+        self._ensure_share_points_exists()
+        self.config["share_points"][arm] = None
+
+    # ========== Geometry Precomputation ==========
+
+    def compute_geometry(self):
+        """
+        Compute geometry section: bases, vertices, share points positions.
+        Delegates to geometry_engine module for actual calculation.
+        
+        Returns:
+            dict: Geometry data with bases, vertices, distances
+        """
+        result = _compute_geometry(self.config)
+        self.config["geometry"] = result
+        return result
+
 
 
 # Test code

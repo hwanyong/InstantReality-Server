@@ -1,0 +1,48 @@
+# Robot tool definitions for Gemini Function Calling
+# These are converted to types.FunctionDeclaration at runtime
+
+tools:
+  - name: move_arm
+    description: "Move robot arm to a position in the image. Specify x,y as image coordinates (0-1000 normalized)."
+    parameters:
+      x:
+        type: NUMBER
+        required: true
+        description: "X position in image (0=left edge, 1000=right edge)"
+      y:
+        type: NUMBER
+        required: true
+        description: "Y position in image (0=top edge, 1000=bottom edge)"
+      z:
+        type: NUMBER
+        description: "Z height in mm. 0=table surface, default 1"
+      arm:
+        type: STRING
+        description: "Which arm: 'left', 'right', or 'auto'"
+      orientation:
+        type: NUMBER
+        description: "Object edge angle in degrees (0-90). 0=edge aligned with image X-axis. Helps gripper align to object edges for optimal grasp."
+
+  - name: open_gripper
+    description: "Open the gripper to release an object"
+    parameters:
+      arm:
+        type: STRING
+        required: true
+        description: "Which arm: 'left' or 'right'"
+
+  - name: close_gripper
+    description: "Close the gripper to grasp an object"
+    parameters:
+      arm:
+        type: STRING
+        required: true
+        description: "Which arm: 'left' or 'right'"
+
+  - name: go_home
+    description: "Move the robot arm to its home (resting) position"
+    parameters:
+      arm:
+        type: STRING
+        required: true
+        description: "Which arm: 'left', 'right', or 'both'"

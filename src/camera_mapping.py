@@ -3,7 +3,13 @@
 
 import json
 import os
-from pyusbcameraindex import enumerate_usb_video_devices_windows
+import platform
+
+try:
+    from pyusbcameraindex import enumerate_usb_video_devices_windows
+    _HAS_USB_ENUM = True
+except ImportError:
+    _HAS_USB_ENUM = False
 
 # Config file path (project root)
 CONFIG_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "camera_config.json")
@@ -31,6 +37,8 @@ def get_available_devices():
     Enumerate all connected USB video devices.
     Returns list of dicts: {index, name, vid, pid, path}
     """
+    if not _HAS_USB_ENUM:
+        return []
     devices = enumerate_usb_video_devices_windows()
     return [
         {
@@ -101,15 +109,25 @@ def assign_role(device_path, role_name):
     return True
 
 
+_cached_roles = None
+
 def get_index_by_role(role_name):
     """
     Get the current OpenCV index for a given role.
     Returns index (int) or None if not connected.
+    Uses cached role mapping to avoid USB re-enumeration.
     """
-    roles = match_roles()
-    if role_name in roles and roles[role_name]["connected"]:
-        return roles[role_name]["index"]
+    global _cached_roles
+    if _cached_roles is None:
+        _cached_roles = match_roles()
+    if role_name in _cached_roles and _cached_roles[role_name]["connected"]:
+        return _cached_roles[role_name]["index"]
     return None
+
+def invalidate_role_cache():
+    """Clear cached role mapping. Call after camera scan/assign."""
+    global _cached_roles
+    _cached_roles = None
 
 
 def get_camera_settings(role_name=None):

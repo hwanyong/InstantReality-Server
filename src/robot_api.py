@@ -1,0 +1,282 @@
+# Robot API Router
+# HTTP endpoints for robot control
+
+from aiohttp import web
+from lib.robot import RobotController
+
+# Singleton controller instance
+robot_controller = None
+
+
+def get_controller():
+    """Get or create the robot controller instance."""
+    global robot_controller
+    if robot_controller is None:
+        robot_controller = RobotController()
+    return robot_controller
+
+
+async def handle_connect(request):
+    """
+    POST /api/robot/connect
+    Connect to robot via serial port.
+    """
+    controller = get_controller()
+    
+    if controller.is_connected():
+        return web.json_response({
+            "success": True,
+            "message": "Already connected"
+        })
+    
+    success = controller.connect()
+    
+    if success:
+        return web.json_response({
+            "success": True,
+            "message": "Connected to robot",
+            "status": controller.get_status()
+        })
+    else:
+        return web.json_response({
+            "success": False,
+            "error": "Failed to connect to robot"
+        }, status=500)
+
+
+async def handle_disconnect(request):
+    """
+    POST /api/robot/disconnect
+    Disconnect from robot.
+    """
+    controller = get_controller()
+    controller.disconnect()
+    
+    return web.json_response({
+        "success": True,
+        "message": "Disconnected"
+    })
+
+
+async def handle_home(request):
+    """
+    POST /api/robot/home
+    Move robot to home position.
+    Body: { "motion_time": 3.0 } (optional)
+    """
+    controller = get_controller()
+    
+    if not controller.is_connected():
+        return web.json_response({
+            "success": False,
+            "error": "Robot not connected"
+        }, status=400)
+    
+    data = {}
+    if request.body_exists:
+        data = await request.json()
+    
+    motion_time = data.get("motion_time", 3.0)
+    
+    success = controller.go_home(motion_time)
+    
+    return web.json_response({
+        "success": success,
+        "message": "Moved to home position" if success else "Motion failed"
+    })
+
+
+async def handle_zero(request):
+    """
+    POST /api/robot/zero
+    Move robot to zero position.
+    Body: { "motion_time": 3.0 } (optional)
+    """
+    controller = get_controller()
+    
+    if not controller.is_connected():
+        return web.json_response({
+            "success": False,
+            "error": "Robot not connected"
+        }, status=400)
+    
+    data = {}
+    if request.body_exists:
+        data = await request.json()
+    
+    motion_time = data.get("motion_time", 3.0)
+    
+    success = controller.go_zero(motion_time)
+    
+    return web.json_response({
+        "success": success,
+        "message": "Moved to zero position" if success else "Motion failed"
+    })
+
+
+async def handle_status(request):
+    """
+    GET /api/robot/status
+    Get robot connection status.
+    """
+    controller = get_controller()
+    
+    return web.json_response({
+        "success": True,
+        "status": controller.get_status()
+    })
+
+
+async def handle_release(request):
+    """
+    POST /api/robot/release
+    Release all servos (E-STOP).
+    """
+    controller = get_controller()
+    controller.release_all()
+    
+    return web.json_response({
+        "success": True,
+        "message": "All servos released"
+    })
+
+
+async def handle_move_to(request):
+    """
+    POST /api/robot/move_to
+    Move robot arm to specified coordinates using IK.
+
+    Body: {
+        "x": 200.0,        # Robot mm (relative to share point)
+        "y": 100.0,        # Robot mm
+        "z": 5.0,          # Robot mm (default 5)
+        "arm": "auto",     # "left" | "right" | "auto"
+        "motion_time": 2.0 # Seconds (default 2)
+    }
+    """
+    from robotics.ik_service import compute_ik_for_motion
+
+    controller = get_controller()
+
+    if not controller.is_connected():
+        return web.json_response({
+            "success": False,
+            "error": "Robot not connected"
+        }, status=400)
+
+    data = await request.json()
+    x = data.get("x", 0.0)
+    y = data.get("y", 0.0)
+    z = data.get("z", 1.0)
+    arm = data.get("arm", "auto")
+    motion_time = data.get("motion_time", 2.0)
+    orientation = data.get("orientation", None)
+
+    # Enforce minimum Z height from execution config (table collision avoidance)
+    from lib.config_loader import load_execution_config
+    exec_config = load_execution_config()
+    min_z = exec_config.get("safety", {}).get("min_z_mm", 5)
+    z = max(min_z, z)
+
+    # Auto arm selection: x < 0 -> left, x >= 0 -> right
+    if arm == "auto":
+        arm = "left_arm" if x < 0 else "right_arm"
+    elif arm == "left":
+        arm = "left_arm"
+    elif arm == "right":
+        arm = "right_arm"
+
+    result = compute_ik_for_motion(x, y, z, arm, orientation)
+
+    # Execute movement
+    success = controller.move_to_pulses(result["targets"], motion_time, wait=True)
+
+    return web.json_response({
+        "success": success,
+        "arm": arm,
+        "yaw_deg": result["yaw_deg"],
+        "target": {"x": x, "y": y, "z": z},
+        "motion_time": motion_time,
+        "valid": result["valid"],
+        "message": "Moving to target" if success else "Motion failed"
+    })
+
+
+async def handle_gripper_open(request):
+    """
+    POST /api/robot/gripper/open
+    Open the gripper to release an object.
+    Body: { "arm": "right" } (optional, default "right")
+    """
+    controller = get_controller()
+    
+    if not controller.is_connected():
+        return web.json_response({
+            "success": False,
+            "error": "Robot not connected"
+        }, status=400)
+    
+    data = {}
+    if request.body_exists:
+        data = await request.json()
+    
+    arm = data.get("arm", "right")
+    
+    try:
+        controller.open_gripper(arm)
+        return web.json_response({
+            "success": True,
+            "message": f"Gripper opened ({arm})"
+        })
+    except Exception as e:
+        return web.json_response({
+            "success": False,
+            "error": str(e)
+        }, status=500)
+
+
+async def handle_gripper_close(request):
+    """
+    POST /api/robot/gripper/close
+    Close the gripper to grasp an object.
+    Body: { "arm": "right" } (optional, default "right")
+    """
+    controller = get_controller()
+    
+    if not controller.is_connected():
+        return web.json_response({
+            "success": False,
+            "error": "Robot not connected"
+        }, status=400)
+    
+    data = {}
+    if request.body_exists:
+        data = await request.json()
+    
+    arm = data.get("arm", "right")
+    
+    try:
+        controller.close_gripper(arm)
+        return web.json_response({
+            "success": True,
+            "message": f"Gripper closed ({arm})"
+        })
+    except Exception as e:
+        return web.json_response({
+            "success": False,
+            "error": str(e)
+        }, status=500)
+
+
+def setup_routes(app):
+    """Register robot API routes with the app."""
+    app.router.add_post('/api/robot/connect', handle_connect)
+    app.router.add_post('/api/robot/disconnect', handle_disconnect)
+    app.router.add_post('/api/robot/home', handle_home)
+    app.router.add_post('/api/robot/zero', handle_zero)
+    app.router.add_get('/api/robot/status', handle_status)
+    app.router.add_post('/api/robot/release', handle_release)
+    app.router.add_post('/api/robot/move_to', handle_move_to)
+    app.router.add_post('/api/robot/gripper/open', handle_gripper_open)
+    app.router.add_post('/api/robot/gripper/close', handle_gripper_close)
+
